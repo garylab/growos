@@ -92,6 +92,7 @@ def update_connection(connection_id: uuid.UUID, body: ConnectionUpdate, db: Sess
         # Changing what the endpoint returns moves the connection to the matching category, and so hands it to a
         # different collection task. Re-derived here rather than left stale on the row.
         conn.category = get_adapter_class(conn.provider_key).category_for_config(conn.config)
+        conn.status = "unverified"
     if body.is_enabled is not None:
         conn.is_enabled = body.is_enabled
     if "project_id" in body.model_fields_set:
@@ -155,6 +156,7 @@ def test_provider_configuration(provider_key: str, body: ConnectionTestIn, db: S
         raise HTTPException(404, str(exc)) from exc
     stored_credentials: dict[str, Any] = {}
     stored_config: dict[str, Any] = {}
+    conn: ProviderConnection | None = None
     if body.connection_id is not None:
         conn = db.get(ProviderConnection, body.connection_id)
         if conn is None or conn.provider_key != provider_key:
@@ -168,6 +170,15 @@ def test_provider_configuration(provider_key: str, body: ConnectionTestIn, db: S
         credentials = {**credentials, **{key: value for key, value in google_client_credentials(credentials).items() if value}}
     try:
         result = cls(credentials=credentials, config={**stored_config, **body.config}).health_check()
+        # A test of the currently saved values is the connection's health check, so persist its outcome. Tests with
+        # unsaved credential/config edits stay provisional: saving those edits resets the row to unverified and the
+        # user can test the newly saved connection once, without us silently saving form input from a Test action.
+        testing_saved_values = conn is not None and not entered and body.config == stored_config
+        if testing_saved_values:
+            conn.status = "healthy" if result.ok else "error"
+            conn.last_error = None if result.ok else result.message[:2000]
+            conn.last_checked_at = datetime.now(UTC)
+            db.commit()
         return {"ok": result.ok, "message": result.message, "details": result.details}
     except Exception as exc:  # noqa: BLE001 — a failed pre-save check is returned as a result, not a server error
         return {"ok": False, "message": str(exc), "details": {}}

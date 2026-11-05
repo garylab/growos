@@ -80,9 +80,10 @@ function JobLogs({ jobId }: { jobId: string }) {
     <div className="space-y-2">
       <div className="flex items-center justify-end gap-2">
         {copyState === "failed" && <span className="text-xs text-red-600 dark:text-red-300">Could not copy</span>}
-        <Button size="sm" variant="outline" onClick={copyLogs} disabled={!logText}>
+        <Button size="icon" variant="outline" onClick={copyLogs} disabled={!logText}
+          className="h-8 w-8" aria-label={copyState === "copied" ? "Logs copied" : "Copy logs"}
+          title={copyState === "copied" ? "Copied" : "Copy logs"}>
           {copyState === "copied" ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-          {copyState === "copied" ? "Copied" : "Copy logs"}
         </Button>
       </div>
       <pre className="max-h-96 overflow-auto rounded bg-slate-950 dark:bg-black p-3 text-xs text-slate-100">
