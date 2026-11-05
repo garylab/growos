@@ -1,0 +1,143 @@
+name: growos
+
+x-backend-env: &backend-env
+  DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-growos}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:-growos}
+  APP_SECRET_KEY: ${APP_SECRET_KEY:?set APP_SECRET_KEY in .env}
+  APP_AUTH_TOKEN: ${APP_AUTH_TOKEN:-}
+  APP_ENV: ${APP_ENV:-production}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8888}
+  GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:-}
+  GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET:-}
+  GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+  SERPAPI_API_KEY: ${SERPAPI_API_KEY:-}
+  APIFY_API_TOKEN: ${APIFY_API_TOKEN:-}
+  GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+  OUTBOUND_ALLOW_HOSTS: ${OUTBOUND_ALLOW_HOSTS:-}
+  ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+  ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+  SESSION_DAYS: ${SESSION_DAYS:-30}
+  SMTP_HOST: ${SMTP_HOST:-}
+  SMTP_PORT: ${SMTP_PORT:-587}
+  SMTP_USER: ${SMTP_USER:-}
+  SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+  SMTP_FROM: ${SMTP_FROM:-}
+  SMTP_STARTTLS: ${SMTP_STARTTLS:-true}
+  DEFAULT_MONTHLY_TOKEN_BUDGET: ${DEFAULT_MONTHLY_TOKEN_BUDGET:-0}
+  ARTIFACTS_DIR: /data/artifacts
+  WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-2}
+  CRAWL_MAX_URLS_DEFAULT: ${CRAWL_MAX_URLS_DEFAULT:-500}
+  CRAWL_USER_AGENT: ${CRAWL_USER_AGENT:-GrowOS-Crawler/0.1}
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-growos}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-growos}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-growos} -d ${POSTGRES_DB:-growos}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    # No host port: the database is reachable only from the compose network.
+
+  migrate:
+    build:
+      context: ./backend
+      target: app
+    image: growos-backend
+    environment: *backend-env
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    image: growos-backend
+    restart: unless-stopped
+    environment: *backend-env
+    volumes:
+      - artifacts:/data/artifacts
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/api/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    # No host port: Caddy proxies /api.
+
+  worker:
+    image: growos-backend
+    restart: unless-stopped
+    environment:
+      <<: *backend-env
+      WORKER_QUEUE: default
+    command: ["python", "-m", "worker.main"]
+    volumes:
+      - artifacts:/data/artifacts
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # lets the worker reach a local Ollama if you run one
+    healthcheck:
+      start_period: 20s
+      test: ["CMD", "python", "-c", "import os,sys,time; sys.exit(0 if time.time()-os.path.getmtime('/tmp/growos-worker-heartbeat')<120 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # Crawling is the one job that needs a native binary, so it runs from its own image and claims only crawl jobs.
+  # Everything else stays on a plain Debian base; see backend/Dockerfile.
+  crawler:
+    build:
+      context: ./backend
+      target: crawler
+      args:
+        BASE: python:3.12-slim-trixie
+    image: growos-crawler
+    restart: unless-stopped
+    environment:
+      <<: *backend-env
+      WORKER_QUEUE: crawler
+      WORKER_CONCURRENCY: ${CRAWLER_CONCURRENCY:-1}
+    command: ["python", "-m", "worker.main"]
+    volumes:
+      - artifacts:/data/artifacts
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      start_period: 20s
+      test: ["CMD", "python", "-c", "import os,sys,time; sys.exit(0 if time.time()-os.path.getmtime('/tmp/growos-worker-heartbeat')<120 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  web:
+    build: ./frontend
+    image: growos-web
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-8888}:8888"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8888/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  pgdata:
+  artifacts:

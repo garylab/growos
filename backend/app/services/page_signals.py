@@ -1,0 +1,258 @@
+"""Brand / conversion / technical signals extracted from a page's HTML.
+
+SiteOne's extra-column xpath only sees the document body, so head-level facts (canonical, robots meta, JSON-LD,
+Open Graph) cannot come from the crawler. We fetch a small set of key pages ourselves through the SSRF-safe client
+and parse them with selectolax. Everything here is observed evidence: a signal is only reported when the page was
+actually fetched and parsed (`checked: true`).
+"""
+from __future__ import annotations
+
+import json
+import re
+from collections.abc import Callable
+from typing import Any
+from urllib.parse import urljoin, urlsplit
+
+from selectolax.parser import HTMLParser
+
+from app.core.safe_http import UnsafeURLError, safe_get
+
+# A renderer takes a URL and returns resolved HTML. Injected rather than imported so these extractors stay free of
+# database and provider concerns, and remain testable with a two-line stub.
+Renderer = Callable[[str], str]
+
+SOCIAL_DOMAINS = ("linkedin.com", "x.com", "twitter.com", "youtube.com", "facebook.com", "instagram.com",
+                  "tiktok.com", "github.com", "threads.net", "bsky.app", "pinterest.com")
+FREE_EMAIL_DOMAINS = ("gmail.com", "googlemail.com", "yahoo.com", "hotmail.com", "outlook.com", "live.com", "aol.com",
+                      "icloud.com", "qq.com", "163.com", "126.com", "mail.ru", "yandex.ru", "proton.me", "protonmail.com",
+                      "gmx.com", "zoho.com", "yeah.net", "foxmail.com")
+CHAT_PATTERNS = re.compile(r"(wa\.me|api\.whatsapp\.com|web\.whatsapp\.com|t\.me|m\.me|messenger\.com)", re.I)
+
+# Analytics / product-analytics tags we can recognise in page HTML.
+ANALYTICS_PATTERNS = {
+    "google_analytics": r"googletagmanager\.com/gtag/js|gtag\(|google-analytics\.com/analytics\.js|googletagmanager\.com/gtm\.js",
+    "plausible": r"plausible\.io/js", "umami": r"umami[^\"']*\.js|data-website-id",
+    "posthog": r"posthog\.(com|init)", "matomo": r"matomo\.(js|php)|piwik",
+    "fathom": r"usefathom\.com", "clarity": r"clarity\.ms", "hotjar": r"hotjar\.com",
+    "mixpanel": r"mixpanel", "amplitude": r"amplitude\.com", "segment": r"segment\.(com|io)/analytics",
+    "meta_pixel": r"connect\.facebook\.net[^\"']*fbevents", "linkedin_insight": r"snap\.licdn\.com",
+}
+EMAIL_CAPTURE_HINTS = re.compile(r"(newsletter|subscribe|sign ?up for|join .{0,20}list|get updates|free trial|waitlist|early access)", re.I)
+
+# Elements a client-side framework mounts into. Empty in the HTML we receive, filled in by the browser.
+SPA_MOUNTS = ("#root", "#app", "#__next", "#__nuxt", "#q-app", "[data-reactroot]", "[data-server-rendered]")
+
+
+def looks_unrendered(html: str) -> bool:
+    """True when a page arrived as an app shell: markup present, content absent.
+
+    Deliberately hard to trigger. A true answer has two consequences — the page is sent to a paid renderer, and if
+    no renderer is connected it is dropped from inspection instead of being reported as broken — so a false
+    positive would quietly hide real findings. A thin-but-real page (a sparse contact page carrying an analytics
+    tag) must therefore come out false, which rules out "short text plus a script" as the test: almost every page
+    on the web has a script.
+
+    What actually distinguishes a shell is that there is nothing in the body to look at. So either a framework
+    mount element is present and empty, or the body has no content elements at all and nearly no text. Script and
+    style text is stripped before measuring, because selectolax counts it as body text — an inline bundle would
+    otherwise make the emptiest page in the world look full.
+    """
+    if not html or len(html) > 400_000:        # a document that large has already rendered something
+        return False
+    tree = HTMLParser(html)
+    if tree.body is None:
+        return False
+    for sel in SPA_MOUNTS:
+        node = tree.css_first(sel)
+        if node is not None and not (node.text(strip=True) or "").strip() and not node.css("img,svg,iframe"):
+            return True
+    if tree.body.css("h1,h2,h3,h4,h5,h6,p,li,article,img,table,input"):
+        return False
+    tree.strip_tags(["script", "style", "noscript", "template"])
+    text = " ".join((tree.body.text(separator=" ") or "").split())
+    return len(text) < 400
+
+
+def extract_signals(html: str, page_url: str) -> dict[str, Any]:
+    tree = HTMLParser(html)
+    head_meta: dict[str, str] = {}
+    for n in tree.css("meta"):
+        key = (n.attributes.get("property") or n.attributes.get("name") or "").lower()
+        if key and n.attributes.get("content"):
+            head_meta.setdefault(key, n.attributes["content"])
+
+    canonical = None
+    for n in tree.css("link[rel]"):
+        if "canonical" in (n.attributes.get("rel") or "").lower() and n.attributes.get("href"):
+            canonical = urljoin(page_url, n.attributes["href"])
+            break
+
+    jsonld_types: list[str] = []
+    for n in tree.css('script[type="application/ld+json"]'):
+        try:
+            payload = json.loads(n.text(strip=True) or "{}")
+        except ValueError:
+            jsonld_types.append("invalid-json")
+            continue
+        for obj in _iter_ld(payload):
+            t = obj.get("@type")
+            if isinstance(t, list):
+                jsonld_types.extend(str(x) for x in t)
+            elif t:
+                jsonld_types.append(str(t))
+
+    chat, tel, mailto, social = None, None, None, []
+    emails: list[str] = []
+    for a in tree.css("a[href]"):
+        href = (a.attributes.get("href") or "").strip()
+        if not href:
+            continue
+        low = href.lower()
+        if chat is None and CHAT_PATTERNS.search(low):
+            chat = href
+        elif low.startswith("tel:") and tel is None:
+            tel = href
+        elif low.startswith("mailto:"):
+            if mailto is None:
+                mailto = href
+            addr = href[7:].split("?")[0].strip().lower()
+            if "@" in addr and addr not in emails:
+                emails.append(addr)
+        else:
+            host = (urlsplit(href).hostname or "").lower().removeprefix("www.")
+            if host and any(host == d or host.endswith("." + d) for d in SOCIAL_DOMAINS) and href not in social:
+                social.append(href)
+
+    # --- logo / visual identity
+    site_host = (urlsplit(page_url).hostname or "").lower().removeprefix("www.")
+    icons = [n.attributes.get("href") for n in tree.css("link[rel]")
+             if "icon" in (n.attributes.get("rel") or "").lower() and n.attributes.get("href")]
+    logo_img = None
+    for n in tree.css("header img, nav img, img"):
+        blob = " ".join(filter(None, [n.attributes.get("class"), n.attributes.get("id"), n.attributes.get("alt"),
+                                      n.attributes.get("src")])).lower()
+        if "logo" in blob or "brand" in blob:
+            logo_img = urljoin(page_url, n.attributes.get("src") or n.attributes.get("data-src") or "")
+            break
+    header_svg = bool(tree.css("header svg, nav svg"))
+    ld_logo = None
+    for obj in _iter_ld_all(tree):
+        lg = obj.get("logo")
+        if isinstance(lg, str):
+            ld_logo = lg
+        elif isinstance(lg, dict) and lg.get("url"):
+            ld_logo = lg["url"]
+        if ld_logo:
+            break
+
+    # --- email on the company's own domain vs a free provider
+    own_domain_emails = [e for e in emails if e.split("@")[-1] in (site_host, f"www.{site_host}") or e.split("@")[-1].endswith("." + site_host)]
+    free_emails = [e for e in emails if e.split("@")[-1] in FREE_EMAIL_DOMAINS]
+
+    # --- hreflang (international SEO)
+    hreflangs = sorted({(n.attributes.get("hreflang") or "").lower() for n in tree.css("link[hreflang]") if n.attributes.get("hreflang")})
+
+    # --- analytics / conversion tracking
+    analytics = sorted({name for name, pat in ANALYTICS_PATTERNS.items() if re.search(pat, html, re.I)})
+
+    # --- email capture (newsletter / waitlist / trial signup)
+    email_input = bool(tree.css('input[type="email"]')) or any(
+        "email" in ((n.attributes.get("name") or "") + (n.attributes.get("id") or "") + (n.attributes.get("placeholder") or "")).lower()
+        for n in tree.css("input"))
+    body_text = tree.body.text(separator=" ", strip=True)[:20000] if tree.body else ""
+    email_capture = email_input and bool(EMAIL_CAPTURE_HINTS.search(body_text))
+
+    # --- physical presence (Google Business Profile relevance)
+    address = None
+    for obj in _iter_ld_all(tree):
+        addr = obj.get("address")
+        if isinstance(addr, dict):
+            address = ", ".join(str(addr[k]) for k in ("streetAddress", "addressLocality", "addressRegion", "addressCountry") if addr.get(k)) or None
+        elif isinstance(addr, str):
+            address = addr
+        if address:
+            break
+
+    robots = (head_meta.get("robots") or "").lower()
+    return {
+        "checked": True,
+        "canonical": canonical,
+        "robots": robots or None,
+        "noindex": "noindex" in robots,
+        "jsonld_types": sorted(set(jsonld_types)),
+        "has_organization_schema": any(t in ("Organization", "Corporation", "LocalBusiness", "WebSite") for t in jsonld_types),
+        "og_title": head_meta.get("og:title"),
+        "og_image": head_meta.get("og:image"),
+        "twitter_card": head_meta.get("twitter:card"),
+        "chat_link": chat,
+        "tel": tel,
+        "mailto": mailto,
+        "social_links": social[:12],
+        "has_form": bool(tree.css("form")),
+        "emails": emails[:10],
+        "own_domain_emails": own_domain_emails[:5],
+        "free_emails": free_emails[:5],
+        "logo_img": logo_img,
+        "logo_in_schema": ld_logo,
+        "favicon": urljoin(page_url, icons[0]) if icons else None,
+        "has_logo": bool(logo_img or ld_logo or header_svg),
+        "header_svg_logo": header_svg,
+        "hreflang": hreflangs,
+        "analytics": analytics,
+        "email_capture": email_capture,
+        "address": address,
+        "has_local_schema": any(t in ("LocalBusiness", "Store", "Restaurant", "ProfessionalService") for t in jsonld_types),
+    }
+
+
+def _iter_ld_all(tree: HTMLParser):
+    for n in tree.css('script[type="application/ld+json"]'):
+        try:
+            payload = json.loads(n.text(strip=True) or "{}")
+        except ValueError:
+            continue
+        yield from _iter_ld(payload)
+
+
+def _iter_ld(payload: Any):
+    if isinstance(payload, dict):
+        if "@graph" in payload and isinstance(payload["@graph"], list):
+            for item in payload["@graph"]:
+                yield from _iter_ld(item)
+        else:
+            yield payload
+    elif isinstance(payload, list):
+        for item in payload:
+            yield from _iter_ld(item)
+
+
+def fetch_signals(url: str, renderer: Renderer | None = None) -> dict[str, Any]:
+    """Fetch one page safely and extract its signals. Returns {'checked': False, 'error': …} on failure.
+
+    `renderer` is an optional paid fallback (SerpApi Extract) used only when the page came back as an app shell.
+    Every signal here is a head- or body-level fact a framework writes after first paint, so on a client-rendered
+    site the direct fetch does not report "no canonical, no H1, no schema" — it reports nothing at all, which the
+    audit would otherwise present as a pile of real problems.
+    """
+    try:
+        resp = safe_get(url, timeout=20)
+    except (UnsafeURLError, Exception) as exc:  # noqa: BLE001
+        return {"checked": False, "error": str(exc)[:300]}
+    if resp.status_code != 200 or "html" not in resp.headers.get("content-type", ""):
+        return {"checked": False, "error": f"HTTP {resp.status_code}"}
+    html, rendered = resp.text, False
+    if renderer is not None and looks_unrendered(html):
+        try:
+            html, rendered = renderer(resp.final_url), True
+        except Exception as exc:  # noqa: BLE001 — the shell is still better evidence than no evidence
+            sig = extract_signals(resp.text, resp.final_url)
+            sig.update({"fetched_url": resp.final_url, "unrendered": True, "render_error": str(exc)[:200]})
+            return sig
+    sig = extract_signals(html, resp.final_url)
+    sig["fetched_url"] = resp.final_url
+    if rendered:
+        sig["rendered"] = True
+    elif renderer is None and looks_unrendered(resp.text):
+        # Say so rather than silently reporting an empty page as a badly built one.
+        sig["unrendered"] = True
+    return sig

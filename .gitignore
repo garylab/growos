@@ -1,0 +1,18 @@
+.env
+.env.*
+!.env.example
+*.pyc
+__pycache__/
+.pytest_cache/
+.venv/
+node_modules/
+frontend/dist/
+data/
+*.log
+.DS_Store
+backend/tests/.tmp/
+tmp/
+*.tsbuildinfo
+
+# Local database dumps — contain encrypted credentials; only restorable with the matching APP_SECRET_KEY.
+backups/
