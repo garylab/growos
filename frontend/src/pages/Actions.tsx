@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatusBadge, Badge } from "@/components/ui/badge";
 import { Field, Input, Select, Textarea } from "@/components/ui/input";
+import { SearchBox } from "@/components/ui/search-box";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { delta, fmtInt, fmtNum, fmtPct } from "@/lib/utils";
 import { TimeAgo } from "@/components/ui/time";
@@ -39,7 +40,7 @@ export function ActionsPage() {
   return (
     <div>
       <PageHeader title="Results" info="Each tracked action compares the weeks before and after it against Search Console, analytics and AI mention data. Start tracking from any Growth Plan item." />
-      <div className="mb-4 flex gap-2"><Input className="max-w-sm" placeholder="Filter actions…" value={filter.q} onChange={(e) => setFilter({ ...filter, q: e.target.value })} /><Select className="w-40" value={filter.status} onChange={(e) => setFilter({ ...filter, status: e.target.value })}><option value="">All statuses</option>{["planned", "in_progress", "done", "cancelled"].map((s) => <option key={s} value={s}>{s.replace("_", " ")}</option>)}</Select><div className="ml-auto"><CsvExportButton filename="actions.csv" rows={rows} columns={ACTION_COLUMNS} /></div></div>
+      <div className="mb-4 flex gap-2"><Select className="w-40" value={filter.status} onChange={(e) => setFilter({ ...filter, status: e.target.value })}><option value="">All statuses</option>{["planned", "in_progress", "done", "cancelled"].map((s) => <option key={s} value={s}>{s.replace("_", " ")}</option>)}</Select><SearchBox className="w-[32rem]" placeholder="Filter actions…" value={filter.q} onSearch={(v) => setFilter({ ...filter, q: v })} /><div className="ml-auto"><CsvExportButton filename="actions.csv" rows={rows} columns={ACTION_COLUMNS} /></div></div>
       <div className="grid lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 space-y-3">
           {!actions?.length ? <EmptyState title="No actions yet">Create actions from opportunities or add one manually.</EmptyState> : <>
@@ -132,7 +133,7 @@ function AnalyticsImport({ pid }: { pid: string }) {
               <Metric label="Avg. engagement" value={fmtDuration(data.totals?.avg_engagement_seconds)} change={delta(data.totals?.avg_engagement_seconds, data.previous?.avg_engagement_seconds)} source={`${fmtInt(data.totals?.engaged_sessions)} engaged sessions`} hint="GA4 average engagement time per session: total engagement time ÷ sessions." />
               <Metric label="Engagement rate" value={fmtPct(data.totals?.engagement_rate, 0)} change={delta(data.totals?.engagement_rate, data.previous?.engagement_rate)} source="engaged / all sessions" />
             </div>
-            <div className="flex gap-2"><Input className="max-w-sm" placeholder="Filter landing pages…" value={filter} onChange={(e) => setFilter(e.target.value)} /><div className="ml-auto"><CsvExportButton filename="analytics-landing-pages.csv" rows={landingPages} columns={LANDING_COLUMNS} /></div></div>
+            <div className="flex gap-2"><SearchBox className="w-[32rem]" placeholder="Filter landing pages…" value={filter} onSearch={setFilter} /><div className="ml-auto"><CsvExportButton filename="analytics-landing-pages.csv" rows={landingPages} columns={LANDING_COLUMNS} /></div></div>
             <Table><THead><TR><TH>Landing page</TH><TH className="text-right">Sessions</TH><TH className="text-right">Conv.</TH><TH className="text-right">Rate</TH></TR></THead>
               <TBody>{pagedPages.items.map((r) => <TR key={r.landing_page}><TD className="text-xs max-w-xs truncate">{r.landing_page}</TD><TD className="text-right tabular-nums">{fmtInt(r.sessions)}</TD><TD className="text-right tabular-nums">{fmtInt(r.conversions)}</TD><TD className="text-right tabular-nums">{fmtPct(r.conversion_rate)}</TD></TR>)}</TBody></Table>
             <Pagination state={pagedPages} label="landing pages" />

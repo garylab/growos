@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type Competitor, type Domain } from "@/lib/api";
-import { useCompetitors, useDomains, useProjectId } from "@/hooks/useProject";
+import { useCompetitors, useDomains, useProject, useProjectId } from "@/hooks/useProject";
 import { useActiveTab } from "@/hooks/useTabRoute";
 import { COMPETITOR_TABS } from "@/lib/nav";
 import { useEnqueue } from "@/hooks/useJobs";
@@ -13,6 +13,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Field, Input, Select, Textarea } from "@/components/ui/input";
+import { SearchBox } from "@/components/ui/search-box";
 import { Badge } from "@/components/ui/badge";
 import { fmtInt, fmtPct } from "@/lib/utils";
 import { TimeAgo } from "@/components/ui/time";
@@ -31,6 +32,14 @@ const WATCH_COLUMNS: CsvColumn<WatchRow>[] = [
   { key: "checked", label: "Last checked", value: (r) => r.obs?.last_observed_at }, { key: "changed", label: "Changed last time", value: (r) => r.obs?.changed_last_time },
 ];
 
+/** Per-tab page heading and its info tooltip, keyed by the tab id from COMPETITOR_TABS. */
+const COMPETITOR_TAB_META: Record<string, { title: string; info: string }> = {
+  "competitors": { title: "Competitors", info: "Who you are compared against in AI answers and search, plus change detection on their pricing and feature pages." },
+  "watched-pages": { title: "Watched pages", info: "Change detection on the competitor pages you choose to watch, such as pricing and features." },
+  "keyword-gap": { title: "Keyword gap", info: "Keywords your competitors rank for that you do not, ranked by opportunity." },
+  "page-changes": { title: "Page changes", info: "What changed on a watched competitor page between two checks." },
+};
+
 export function CompetitorsPage() {
   const pid = useProjectId();
   const { data: competitors, isLoading } = useCompetitors();
@@ -43,8 +52,8 @@ export function CompetitorsPage() {
   return (
     <div>
       <PageHeader
-        title="Competitors"
-        info="Who you are compared against in AI answers and search, plus change detection on their pricing and feature pages."
+        title={COMPETITOR_TAB_META[tab]?.title ?? "Competitors"}
+        info={COMPETITOR_TAB_META[tab]?.info ?? "Who you are compared against in AI answers and search, plus change detection on their pricing and feature pages."}
         actions={<>
           {tab === "competitors" && <Button onClick={() => setEditing("new")}>Add competitor</Button>}
           {tab === "watched-pages" && <Button onClick={() => setAddingWatch(true)}>Add</Button>}
@@ -72,6 +81,7 @@ export function CompetitorsPage() {
 function CompetitorTable({ pid, competitors, domains, onEdit }: { pid: string; competitors: Competitor[]; domains: Domain[]; onEdit: (c: Competitor) => void }) {
   const [filter, setFilter] = useState("");
   const qc = useQueryClient();
+  const { data: project } = useProject();
   const { data: vis } = useQuery({ queryKey: ["visibility", pid], queryFn: () => api.get<Visibility>(`/projects/${pid}/geo/visibility`) });
   const del = useMutation({ mutationFn: (id: string) => api.delete(`/projects/${pid}/competitors/${id}`), onSuccess: () => { qc.invalidateQueries({ queryKey: ["competitors", pid] }); qc.invalidateQueries({ queryKey: ["domains", pid] }); } });
   const rows = competitors.filter((row) => !filter || `${row.name} ${row.aliases.join(" ")} ${row.notes ?? ""}`.toLowerCase().includes(filter.toLowerCase()));
@@ -79,7 +89,7 @@ function CompetitorTable({ pid, competitors, domains, onEdit }: { pid: string; c
   if (!competitors.length) return <EmptyState title="No competitors yet">Add the competitors you want to track.</EmptyState>;
   return (
     <>
-      <div className="mb-3 flex gap-2"><Input className="max-w-sm" placeholder="Filter competitors…" value={filter} onChange={(e) => setFilter(e.target.value)} /><div className="ml-auto"><CsvExportButton filename="competitors.csv" rows={rows} columns={COMPETITOR_COLUMNS} /></div></div>
+      <div className="mb-3 flex gap-2"><SearchBox className="w-[32rem]" placeholder="Filter competitors…" value={filter} onSearch={setFilter} /><div className="ml-auto"><CsvExportButton filename="competitors.csv" rows={rows} columns={COMPETITOR_COLUMNS} /></div></div>
       <Table>
         <THead><TR><TH>Competitor</TH><TH>Aliases</TH><TH>Websites</TH><TH className="text-right">AI mentions</TH><TH>Trend</TH><TH className="text-right">Watched URLs</TH><TH /></TR></THead>
         <TBody>
@@ -110,7 +120,7 @@ function CompetitorTable({ pid, competitors, domains, onEdit }: { pid: string; c
       </Table>
       <Pagination state={paged} label="competitors" />
       <ErrorBox error={del.error} />
-      {vis?.summary.samples ? <p className="mt-2 text-xs text-muted-foreground">AI mentions: share of {vis.summary.samples} sampled answers in the latest run. Your brand: {fmtPct(vis.summary.brand_mention_rate, 0)}.</p> : null}
+      {vis?.summary.samples ? <p className="mt-2 text-xs text-muted-foreground">AI mentions: share of {vis.summary.samples} sampled answers in the latest run. {project?.name ?? "Your brand"}: {fmtPct(vis.summary.brand_mention_rate, 0)}.</p> : null}
     </>
   );
 }
@@ -187,7 +197,7 @@ function WatchedPages({ pid, adding, onAddDone }: { pid: string; adding: boolean
         <EmptyState title="No watched pages yet">Use “Add watched page” to pick the pages worth checking for changes.</EmptyState>
       ) : (
         <>
-          <div className="mb-3 flex gap-2"><Input className="max-w-sm" placeholder="Filter watched pages…" value={filter} onChange={(e) => setFilter(e.target.value)} /><div className="ml-auto"><CsvExportButton filename="watched-competitor-pages.csv" rows={filteredRows} columns={WATCH_COLUMNS} /></div></div>
+          <div className="mb-3 flex gap-2"><SearchBox className="w-[32rem]" placeholder="Filter watched pages…" value={filter} onSearch={setFilter} /><div className="ml-auto"><CsvExportButton filename="watched-competitor-pages.csv" rows={filteredRows} columns={WATCH_COLUMNS} /></div></div>
           <Table>
             <THead><TR><TH>URL</TH><TH>Competitor</TH><TH>Status</TH><TH>Last checked</TH><TH>Changed last time</TH><TH /></TR></THead>
             <TBody>{pagedRows.items.map((r) => (
@@ -345,7 +355,7 @@ function KeywordGap({ pid }: { pid: string }) {
           Hide competitors' brand names
         </label>
         <span>{fmtInt(t.shown)} shown of {fmtInt(t.gaps)} gap(s) · {fmtInt(t.gap_volume)} searches/mo out of reach{t.branded_excluded > 0 && hideBranded && ` · ${fmtInt(t.branded_excluded)} branded hidden`} · checked {data.observed_on}</span>
-        <Input className="w-64" placeholder="Filter keywords…" value={filter} onChange={(e) => setFilter(e.target.value)} />
+        <SearchBox className="w-[32rem]" placeholder="Filter keywords…" value={filter} onSearch={setFilter} />
         <div className="ml-auto"><CsvExportButton filename="competitor-keyword-gap.csv" rows={rows} columns={GAP_COLUMNS} /></div>
       </div>
       <Table>
@@ -377,7 +387,7 @@ function PageChanges({ pid }: { pid: string }) {
   if (!changes?.length) return <EmptyState title="No changes detected yet">Changes appear after at least two checks of a watched URL.</EmptyState>;
   return (
     <>
-      <div className="mb-3 flex items-center gap-2"><Link to="/competitors/watched-pages" className="text-xs text-primary hover:underline">← Back to watched pages</Link><Input className="ml-3 max-w-sm" placeholder="Filter changes…" value={filter} onChange={(e) => setFilter(e.target.value)} /><div className="ml-auto"><CsvExportButton filename="competitor-page-changes.csv" rows={rows} columns={CHANGE_COLUMNS} /></div></div>
+      <div className="mb-3 flex items-center gap-2"><Link to="/competitors/watched-pages" className="text-xs text-primary hover:underline">← Back to watched pages</Link><SearchBox className="ml-3 w-[32rem]" placeholder="Filter changes…" value={filter} onSearch={setFilter} /><div className="ml-auto"><CsvExportButton filename="competitor-page-changes.csv" rows={rows} columns={CHANGE_COLUMNS} /></div></div>
       {paged.items.map((c) => (
         <Card key={c.id} className="mb-3"><CardContent className="pt-5">
           <div className="flex justify-between gap-3">

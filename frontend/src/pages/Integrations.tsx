@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge, StatusBadge } from "@/components/ui/badge";
 import { Field, Input, PasswordInput, Select, Textarea } from "@/components/ui/input";
+import { SearchBox } from "@/components/ui/search-box";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { TimeAgo } from "@/components/ui/time";
@@ -66,7 +67,7 @@ export function IntegrationsPage() {
             <p className="text-muted-foreground">No OAuth? Paste a service-account JSON on the provider below instead.</p>
           </CardContent></Card>
       )}
-      <div className="mb-3 flex gap-2"><Input className="max-w-sm" placeholder="Filter providers…" value={query} onChange={(e) => setQuery(e.target.value)} /><div className="ml-auto"><CsvExportButton filename="integrations.csv" rows={shown} columns={columns} /></div></div>
+      <div className="mb-3 flex gap-2"><SearchBox className="w-[32rem]" placeholder="Filter providers…" value={query} onSearch={setQuery} /><div className="ml-auto"><CsvExportButton filename="integrations.csv" rows={shown} columns={columns} /></div></div>
       <Table className="table-fixed min-w-[64rem]">
         <THead><TR>
           <TH className="w-[28%]">Provider</TH><TH className="w-[34%]">Can do</TH>

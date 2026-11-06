@@ -1,8 +1,8 @@
-import { ChevronDown, ChevronRight } from "lucide-react";
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useParams } from "react-router-dom";
-import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Link, useParams, useSearchParams } from "react-router-dom";
+import { TimeSeriesChart } from "@/components/ui/timeseries-chart";
 import { api, type Domain } from "@/lib/api";
 import { useDomains, useProjectId } from "@/hooks/useProject";
 import { useActiveTab } from "@/hooks/useTabRoute";
@@ -17,6 +17,7 @@ import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { Badge, StatusBadge } from "@/components/ui/badge";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Input, Select } from "@/components/ui/input";
+import { SearchBox } from "@/components/ui/search-box";
 import { cn, delta, fmtInt, fmtNum, fmtPct } from "@/lib/utils";
 import { fmtDateTime } from "@/lib/time";
 import { TimeAgo } from "@/components/ui/time";
@@ -33,6 +34,16 @@ interface Row { page?: string; query?: string; clicks: number; impressions: numb
 interface Perf { id: string; url: string; strategy: string; measurement_type: string; tool_version: string | null; scores: Record<string, number | string | null>; metrics: Record<string, number | null>; audits: { id: string; title: string; score: number | null; display?: string }[]; observed_at: string }
 
 
+/** Per-tab page heading and its info tooltip. Keyed by the tab id from SEO_TABS. */
+const SEO_TAB_META: Record<string, { title: string; info: string }> = {
+  "audit-and-pages": { title: "Audit & pages", info: "Technical audit from SiteOne Crawler, plus every crawled page with its SEO score and findings." },
+  "search-performance": { title: "Search performance", info: "Clicks, impressions, CTR and average position from Google Search Console and Bing Webmaster Tools." },
+  "page-performance": { title: "Page performance", info: "Core Web Vitals and Lighthouse scores measured through PageSpeed Insights." },
+  "backlinks": { title: "Backlinks", info: "Referring domains and individual backlinks from the connected backlink provider." },
+  "rankings": { title: "Rankings", info: "Tracked keyword positions on live search engine result pages, with movement since the last check." },
+  "history": { title: "Crawl history", info: "Past crawls over time, and a side-by-side comparison of any two snapshots." },
+};
+
 export function SeoPage() {
   const pid = useProjectId();
   const { data: domains } = useDomains();
@@ -43,6 +54,15 @@ export function SeoPage() {
   const enqueue = useEnqueue();
   const tab = useActiveTab(SEO_TABS, "audit-and-pages");
   const { view } = useParams<{ view?: string }>();
+  // Rankings engine lives here so its picker can sit in the page header; the query is shared (same key) with
+  // RankingsTab, so react-query runs it once. Scoped to the rankings tab.
+  const [rankEngine, setRankEngine] = useState("");
+  const rankings = useQuery({
+    queryKey: ["rankings", pid, domain?.id, rankEngine],
+    queryFn: () => api.get<Rankings>(`/projects/${pid}/seo/domains/${domain!.id}/rankings${rankEngine ? `?provider_key=${rankEngine}` : ""}`),
+    enabled: tab === "rankings" && !!domain,
+    refetchInterval: 30000,
+  });
   if (!domains) return <Loading />;
   if (!domain) return <EmptyState title="No website yet">Add your website under <Link className="text-primary underline" to="/settings">Settings</Link>.</EmptyState>;
   const rerun = () => {
@@ -64,12 +84,18 @@ export function SeoPage() {
   return (
     <div>
       <PageHeader
-        title="SEO Performance"
-        info="Technical audit (SiteOne Crawler), page performance (Lighthouse via PageSpeed Insights) and search performance (Google Search Console)."
+        title={SEO_TAB_META[tab]?.title ?? "SEO Performance"}
+        info={SEO_TAB_META[tab]?.info ?? "Technical audit, page and search performance for your site."}
         actions={
           <>
             {primaries.length > 1 && <Select className="w-56" value={domain.id} onChange={(e) => setDomainId(e.target.value)}>{primaries.map((d) => <option key={d.id} value={d.id}>{d.hostname}</option>)}</Select>}
-            {tab === "search-performance" && <Select className="w-32" value={searchDays} onChange={(e) => setSearchDays(Number(e.target.value))}>{[7, 28, 90, 180].map((d) => <option key={d} value={d}>Last {d} days</option>)}</Select>}
+            {tab === "search-performance" && <Select className="w-36" value={searchDays} onChange={(e) => setSearchDays(Number(e.target.value))}>{[7, 28, 90, 180].map((d) => <option key={d} value={d}>Last {d} days</option>)}</Select>}
+            {tab === "rankings" && (rankings.data?.providers?.length ?? 0) > 1 && (
+              <Select className="w-48" value={rankEngine} onChange={(e) => setRankEngine(e.target.value)}>
+                <option value="">All search engines</option>
+                {rankings.data!.providers!.map((k) => <option key={k} value={k}>{k}</option>)}
+              </Select>
+            )}
             <Button onClick={rerun} disabled={enqueue.isPending}>Re-run</Button>
           </>
         }
@@ -79,7 +105,7 @@ export function SeoPage() {
       {tab === "search-performance" && <SearchTab pid={pid} domain={domain} days={searchDays} />}
       {tab === "page-performance" && <PerformanceTab pid={pid} domain={domain} />}
       {tab === "backlinks" && <BacklinksTab pid={pid} domain={domain} />}
-      {tab === "rankings" && <RankingsTab pid={pid} domain={domain} />}
+      {tab === "rankings" && <RankingsTab pid={pid} domain={domain} engine={rankEngine} />}
       {tab === "history" && <HistoryTab pid={pid} domain={domain} />}
     </div>
   );
@@ -254,11 +280,11 @@ function AuditTab({ pid, domain }: { pid: string; domain: Domain }) {
 
       {auditView === "pages" && <div>
           <div className="mb-3 flex flex-wrap gap-2">
-            <Input className="max-w-sm" placeholder="Filter by URL…" value={pageFilter.q} onChange={(e) => setPageFilter({ ...pageFilter, q: e.target.value })} />
-            <Input type="number" min={0} max={100} className="w-28" placeholder="Min score" value={pageFilter.minScore} onChange={(e) => setPageFilter({ ...pageFilter, minScore: e.target.value })} />
-            <Input type="number" min={0} max={100} className="w-28" placeholder="Max score" value={pageFilter.maxScore} onChange={(e) => setPageFilter({ ...pageFilter, maxScore: e.target.value })} />
             <Select className="w-32" value={pageFilter.status} onChange={(e) => setPageFilter({ ...pageFilter, status: e.target.value })}><option value="">All statuses</option>{pageStatuses.map((status) => <option key={status} value={status}>{status}</option>)}</Select>
             <Select className="w-36" value={pageFilter.issues} onChange={(e) => setPageFilter({ ...pageFilter, issues: e.target.value })}><option value="">All issues</option><option value="with">With issues</option><option value="without">Without issues</option></Select>
+            <Input type="number" min={0} max={100} className="w-28" placeholder="Min score" value={pageFilter.minScore} onChange={(e) => setPageFilter({ ...pageFilter, minScore: e.target.value })} />
+            <Input type="number" min={0} max={100} className="w-28" placeholder="Max score" value={pageFilter.maxScore} onChange={(e) => setPageFilter({ ...pageFilter, maxScore: e.target.value })} />
+            <SearchBox className="w-[32rem]" placeholder="Filter by URL…" value={pageFilter.q} onSearch={(v) => setPageFilter({ ...pageFilter, q: v })} />
             <div className="ml-auto"><CsvExportButton
               filename={`${domain.hostname}-audit-pages.csv`}
               rows={filteredPages}
@@ -314,7 +340,7 @@ function InspectPanel({ pid, runId, code, base }: { pid: string; runId: string; 
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-3 text-sm">
         <span><b>{data.pages_with_issues}</b> of {data.checked} checked page(s) affected · {data.pages_clean} clean</span>
-        <Select className="w-32 ml-auto" value={limit} onChange={(e) => setLimit(Number(e.target.value))}>{[10, 25, 40, 60].map((n) => <option key={n} value={n}>check {n} pages</option>)}</Select>
+        <Select className="w-40 ml-auto" value={limit} onChange={(e) => setLimit(Number(e.target.value))}>{[10, 25, 40, 60].map((n) => <option key={n} value={n}>check {n} pages</option>)}</Select>
         <Button size="sm" variant="outline" onClick={() => refetch()}>Re-check</Button>
       </div>
       <p className="text-xs text-muted-foreground">{data.note}</p>
@@ -389,7 +415,7 @@ function SearchTab({ pid, domain, days }: { pid: string; domain: Domain; days: n
         ))}
       </nav>
       <div className="flex items-center gap-2">
-        <Input className="max-w-sm" placeholder={searchView === "query-pages" ? "Filter queries or pages…" : "Filter current report…"} value={reportFilter} onChange={(e) => setReportFilter(e.target.value)} />
+        <SearchBox className="w-[32rem]" placeholder={searchView === "query-pages" ? "Filter queries or pages…" : "Filter current report…"} value={reportFilter} onSearch={setReportFilter} />
         <div className="ml-auto">
           {searchView === "top-queries" && <CsvExportButton filename={`${domain.hostname}-top-queries.csv`} rows={topQueries} columns={rowCsvColumns("query")} />}
           {searchView === "top-landing-pages" && <CsvExportButton filename={`${domain.hostname}-top-landing-pages.csv`} rows={topPages} columns={rowCsvColumns("page")} />}
@@ -529,9 +555,9 @@ function PerformanceTab({ pid, domain }: { pid: string; domain: Domain }) {
   return (
     <div>
     <div className="mb-3 flex flex-wrap gap-2">
-      <Input className="max-w-sm" placeholder="Filter by URL…" value={filter.q} onChange={(e) => setFilter({ ...filter, q: e.target.value })} />
       <Select className="w-36" value={filter.type} onChange={(e) => setFilter({ ...filter, type: e.target.value })}><option value="">All types</option>{types.map((type) => <option key={type}>{type}</option>)}</Select>
-      <Select className="w-36" value={filter.strategy} onChange={(e) => setFilter({ ...filter, strategy: e.target.value })}><option value="">All strategies</option>{strategies.map((strategy) => <option key={strategy}>{strategy}</option>)}</Select>
+      <Select className="w-44" value={filter.strategy} onChange={(e) => setFilter({ ...filter, strategy: e.target.value })}><option value="">All strategies</option>{strategies.map((strategy) => <option key={strategy}>{strategy}</option>)}</Select>
+      <SearchBox className="w-[32rem]" placeholder="Filter by URL…" value={filter.q} onSearch={(v) => setFilter({ ...filter, q: v })} />
       <div className="ml-auto"><CsvExportButton filename={`${domain.hostname}-page-performance.csv`} rows={filtered} columns={columns} /></div>
     </div>
     <Table containerClassName="rounded-none border-0">
@@ -555,7 +581,8 @@ interface Backlinks {
 
 function BacklinksTab({ pid, domain }: { pid: string; domain: Domain }) {
   const { data, isLoading } = useQuery({ queryKey: ["backlinks", pid, domain.id], queryFn: () => api.get<Backlinks>(`/projects/${pid}/seo/domains/${domain.id}/backlinks`), refetchInterval: 30000 });
-  const [view, setView] = useState<"links" | "domains">("links");
+  const { view: viewParam } = useParams<{ view?: string }>();
+  const view = viewParam === "links" ? "links" : "domains";
   const [domainFilter, setDomainFilter] = useState({ q: "", status: "" });
   const filteredDomains = useMemo(() => (data?.domains ?? []).filter((row) =>
     (!domainFilter.q || row.referring_domain.toLowerCase().includes(domainFilter.q.toLowerCase()))
@@ -597,33 +624,26 @@ function BacklinksTab({ pid, domain }: { pid: string; domain: Domain }) {
       </div>}
       {(data.history?.length ?? 0) > 1 && (
         <Card>
-          <CardHeader><CardTitle info="One point per sync. Indexes revise their data, so small wobbles are normal.">Referring domains over time</CardTitle></CardHeader>
+          <CardHeader><CardTitle info="One point per sync. Indexes revise their data, so small wobbles are normal.">Referring domains</CardTitle></CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={200}>
-              <AreaChart data={data.history}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#eef2f7" />
-                <XAxis dataKey="date" tick={{ fontSize: 11 }} tickFormatter={(d) => String(d).slice(5)} />
-                <YAxis tick={{ fontSize: 11 }} /><Tooltip />
-                <Area type="monotone" dataKey="referring_domains" stroke="#2563eb" fill="#bfdbfe" name="Referring domains" />
-              </AreaChart>
-            </ResponsiveContainer>
+            <TimeSeriesChart data={data.history ?? []} xKey="date" xTickFormatter={(d) => String(d).slice(5)}
+              series={[{ key: "referring_domains", label: "Referring domains", color: "#2563eb" }]} />
           </CardContent>
         </Card>
       )}
-      <div className="flex gap-1 rounded-md border p-1 w-fit text-sm">
-        {([["links", "Backlinks"], ["domains", "Referring domains"]] as const).map(([k, label]) => (
-          <button key={k} type="button" onClick={() => setView(k)}
-            className={cn("rounded px-3 py-1", view === k ? "bg-slate-100 font-medium dark:bg-slate-800" : "text-muted-foreground hover:text-foreground")}>
-            {label}
-          </button>
+      <nav aria-label="Backlink views" className="flex gap-6 border-b">
+        {([["domains", "Referring domains"], ["links", "Backlinks"]] as const).map(([k, label]) => (
+          <div key={k} className={cn("-mb-px flex items-center gap-1.5 border-b-2 px-1 pb-2 text-sm font-medium", view === k ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}>
+            <Link to={`/seo/backlinks/${k}`} aria-current={view === k ? "page" : undefined}>{label}</Link>
+          </div>
         ))}
-      </div>
+      </nav>
       {view === "links" && <BacklinkLinks pid={pid} domain={domain} />}
       {view === "domains" && (
       <div>
         <div className="mb-3 flex flex-wrap gap-2">
-          <Input className="max-w-sm" placeholder="Filter by domain…" value={domainFilter.q} onChange={(e) => setDomainFilter({ ...domainFilter, q: e.target.value })} />
           <Select className="w-36" value={domainFilter.status} onChange={(e) => setDomainFilter({ ...domainFilter, status: e.target.value })}><option value="">All domains</option><option value="new">New</option><option value="existing">Existing</option></Select>
+          <SearchBox className="w-[32rem]" placeholder="Filter by domain…" value={domainFilter.q} onSearch={(v) => setDomainFilter({ ...domainFilter, q: v })} />
           <InfoHint>Sorted by number of links. “New” marks domains that were not in the previous snapshot.</InfoHint>
           <div className="ml-auto"><CsvExportButton filename={`${domain.hostname}-referring-domains.csv`} rows={filteredDomains} columns={domainColumns} /></div>
         </div>
@@ -635,7 +655,9 @@ function BacklinksTab({ pid, domain }: { pid: string; domain: Domain }) {
                   <a className="text-primary hover:underline" href={d.example_url ?? `https://${d.referring_domain}`} target="_blank" rel="noreferrer">{d.referring_domain}</a>
                   {d.is_new && <Badge variant="success" className="ml-1">new</Badge>}
                 </TD>
-                <TD className="text-right tabular-nums">{fmtInt(d.backlinks)}</TD>
+                <TD className="text-right tabular-nums">
+                  <Link className="text-primary hover:underline" to={`/seo/backlinks/links?q=${encodeURIComponent(d.referring_domain)}`} title={`Show backlinks from ${d.referring_domain}`}>{fmtInt(d.backlinks)}</Link>
+                </TD>
                 <TD className="text-right tabular-nums">{d.dofollow ? fmtInt(d.dofollow) : <span className="text-muted-foreground">—</span>}</TD>
                 <TD className="text-right tabular-nums">{d.domain_rating != null ? fmtNum(d.domain_rating, 0) : <span className="text-muted-foreground">—</span>}</TD>
                 <TD className="text-xs text-muted-foreground">{d.first_seen ?? "—"}</TD>
@@ -654,19 +676,21 @@ interface LinkRow { url_from: string; url_to: string; referring_domain: string; 
 interface LinkGroup { referring_domain: string; links: number; dofollow: number; nofollow: number; distinct_anchors: number; domain_rating: number | null; first_seen: string | null; last_seen: string | null; top_anchor: string | null }
 interface Links { available: boolean; totals: { links: number; dofollow: number; nofollow: number; referring_domains: number; distinct_anchors: number }; groups: LinkGroup[]; links: LinkRow[]; top_anchors: { anchor: string; links: number }[] }
 
-/** The Ahrefs-style view: one row per linking site, expandable to the individual links and their anchor text. */
+/** Flat list of individual backlinks: one row per link, no collapsing. The text filter lives in the URL so a
+ *  "links" number on the Referring domains tab can deep-link straight to this site's backlinks. */
 function BacklinkLinks({ pid, domain }: { pid: string; domain: Domain }) {
-  const [q, setQ] = useState("");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const q = searchParams.get("q") ?? "";
+  const setQ = (v: string) => setSearchParams((prev) => { const next = new URLSearchParams(prev); if (v) next.set("q", v); else next.delete("q"); return next; }, { replace: true });
   const [follow, setFollow] = useState("");
-  const [open, setOpen] = useState<string | null>(null);
   const filters = new URLSearchParams();
   if (q.trim()) filters.set("q", q.trim());
   if (follow) filters.set("dofollow", follow);
   const { data, isLoading } = useQuery({
-    queryKey: ["backlink-groups", pid, domain.id, q, follow],
+    queryKey: ["backlink-links-flat", pid, domain.id, q, follow],
     queryFn: () => api.get<Links>(`/projects/${pid}/seo/domains/${domain.id}/backlinks/links?${filters}`),
   });
-  const paged = usePaged(data?.groups);
+  const paged = usePaged(data?.links);
   if (isLoading) return <Loading />;
   if (!data?.available) {
     return <EmptyState title="No individual links stored yet">
@@ -675,122 +699,56 @@ function BacklinkLinks({ pid, domain }: { pid: string; domain: Domain }) {
     </EmptyState>;
   }
   const t = data.totals;
-  const groupColumns: CsvColumn<LinkGroup>[] = [
+  const linkColumns: CsvColumn<LinkRow>[] = [
     { key: "site", label: "Linking site", value: (row) => row.referring_domain },
-    { key: "links", label: "Links", value: (row) => row.links },
+    { key: "url_from", label: "Linking page", value: (row) => row.url_from },
+    { key: "page_title", label: "Page title", value: (row) => row.page_title },
+    { key: "anchor", label: "Anchor", value: (row) => row.anchor },
+    { key: "url_to", label: "Target", value: (row) => row.url_to },
     { key: "dofollow", label: "Dofollow", value: (row) => row.dofollow },
-    { key: "nofollow", label: "Nofollow", value: (row) => row.nofollow },
-    { key: "anchors", label: "Distinct anchors", value: (row) => row.distinct_anchors },
     { key: "rating", label: "Domain rating", value: (row) => row.domain_rating },
-    { key: "top_anchor", label: "Top anchor", value: (row) => row.top_anchor },
     { key: "first_seen", label: "First seen", value: (row) => row.first_seen },
     { key: "last_seen", label: "Last seen", value: (row) => row.last_seen },
   ];
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
-        <Input className="w-72" placeholder="Filter by domain, anchor or URL…" value={q} onChange={(e) => { setQ(e.target.value); setOpen(null); }} />
-        <Select className="w-40" value={follow} onChange={(e) => { setFollow(e.target.value); setOpen(null); }}>
+        <Select className="w-44" value={follow} onChange={(e) => setFollow(e.target.value)}>
           <option value="">Follow + nofollow</option><option value="true">Dofollow only</option><option value="false">Nofollow only</option>
         </Select>
+        <SearchBox className="w-[36rem]" placeholder="Filter by domain, anchor or URL…" value={q} onSearch={setQ} />
         <span className="text-xs text-muted-foreground">{fmtInt(t.links)} links from {fmtInt(t.referring_domains)} site(s) · {fmtInt(t.dofollow)} dofollow · {fmtInt(t.distinct_anchors)} distinct anchors</span>
-        <div className="ml-auto"><CsvExportButton filename={`${domain.hostname}-backlinks.csv`} rows={data.groups} columns={groupColumns} /></div>
+        <div className="ml-auto"><CsvExportButton filename={`${domain.hostname}-backlinks.csv`} rows={data.links} columns={linkColumns} /></div>
       </div>
-      {data.top_anchors.length > 0 && (
-        <Card>
-          <CardHeader><CardTitle info="What other sites actually call you. A healthy profile is mostly your brand and natural phrases, not one repeated exact-match keyword.">Most used anchor text</CardTitle></CardHeader>
-          <CardContent className="flex flex-wrap gap-1.5">
-            {data.top_anchors.map((a) => (
-              <button key={a.anchor} type="button" onClick={() => { setQ(a.anchor); setOpen(null); }}
-                className="rounded-full border px-2.5 py-0.5 text-xs hover:bg-slate-100 dark:hover:bg-slate-800">
-                {a.anchor} <span className="tabular-nums text-muted-foreground">{a.links}</span>
-              </button>
-            ))}
-          </CardContent>
-        </Card>
-      )}
-      <div>
-        <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">Linking sites ({fmtInt(data.groups.length)})<InfoHint>One row per linking site. Click a row to list its individual links, each with the page it sits on, its anchor text and the page on your site it points at.</InfoHint></div>
-          <Table containerClassName="rounded-none border-0">
-            <THead><TR><TH>Linking site</TH><TH className="text-right">Links</TH><TH>Type</TH><TH className="text-right">Anchors</TH><TH className="text-right">DR</TH><TH>First seen</TH></TR></THead>
-            <TBody>{paged.items.map((g) => {
-              const expanded = open === g.referring_domain;
-              return (
-                <Fragment key={g.referring_domain}>
-                  <TR className="cursor-pointer" onClick={() => setOpen(expanded ? null : g.referring_domain)}>
-                    <TD>
-                      <div className="flex items-center gap-1.5">
-                        {expanded ? <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" /> : <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
-                        <span className="font-medium">{g.referring_domain}</span>
-                      </div>
-                      {g.top_anchor && <div className="ml-5 truncate text-xs text-muted-foreground" title={g.top_anchor}>mostly “{g.top_anchor}”</div>}
-                    </TD>
-                    <TD className="text-right tabular-nums">{fmtInt(g.links)}</TD>
-                    <TD className="text-xs">
-                      {g.dofollow > 0 && <Badge variant="success">{g.nofollow ? `${fmtInt(g.dofollow)} dofollow` : "dofollow"}</Badge>}
-                      {g.nofollow > 0 && <Badge variant="muted" className={g.dofollow ? "ml-1" : ""}>{g.dofollow ? `${fmtInt(g.nofollow)} nofollow` : "nofollow"}</Badge>}
-                    </TD>
-                    <TD className="text-right tabular-nums text-xs">{g.distinct_anchors || <span className="text-muted-foreground">—</span>}</TD>
-                    <TD className="text-right tabular-nums text-xs">{g.domain_rating != null ? fmtNum(g.domain_rating, 0) : "—"}</TD>
-                    <TD className="whitespace-nowrap text-xs text-muted-foreground">{g.first_seen ?? "—"}</TD>
-                  </TR>
-                  {expanded && (
-                    <TR>
-                      <TD colSpan={6} className="bg-slate-50 p-0 dark:bg-slate-800/40">
-                        <GroupLinks pid={pid} domain={domain} host={g.referring_domain} filters={filters} />
-                      </TD>
-                    </TR>
-                  )}
-                </Fragment>
-              );
-            })}
-            </TBody>
-          </Table>
-          <Pagination state={paged} label="sites" />
-      </div>
-    </div>
-  );
-}
-
-/** The individual links from one site, fetched only when its row is opened. */
-function GroupLinks({ pid, domain, host, filters }: { pid: string; domain: Domain; host: string; filters: URLSearchParams }) {
-  const qs = new URLSearchParams(filters);
-  qs.set("referring_domain", host);
-  const { data, isLoading } = useQuery({
-    queryKey: ["backlink-links", pid, domain.id, host, qs.toString()],
-    queryFn: () => api.get<Links>(`/projects/${pid}/seo/domains/${domain.id}/backlinks/links?${qs}`),
-  });
-  const paged = usePaged(data?.links, 10);
-  if (isLoading) return <div className="px-3 py-2"><Loading label="Loading links…" /></div>;
-  if (!data?.links.length) return <div className="px-3 py-3 text-xs text-muted-foreground">No links matched.</div>;
-  return (
-    <div className="px-3 py-2">
-      <table className="w-full text-xs">
-        <tbody>
-          {paged.items.map((l, i) => (
-            <tr key={`${l.url_from}|${l.anchor}|${i}`} className="border-b last:border-0 align-top">
-              <td className="max-w-sm py-1.5 pr-3">
-                {l.page_title && <div className="truncate font-medium" title={l.page_title}>{l.page_title}</div>}
-                <a className="block truncate text-primary hover:underline" href={l.url_from} target="_blank" rel="noreferrer" title={l.url_from}>{l.url_from}</a>
-              </td>
-              <td className="max-w-xs py-1.5 pr-3">
-                {l.anchor ? <span title={l.anchor}>“{l.anchor}”</span> : <span className="italic text-muted-foreground">no anchor text (image or empty)</span>}
-              </td>
-              <td className="max-w-[12rem] py-1.5 pr-3">
-                <span className="text-muted-foreground">→ </span>
-                <a className="text-primary hover:underline" href={l.url_to} target="_blank" rel="noreferrer" title={l.url_to}>{l.url_to.replace(/^https?:\/\/[^/]+/, "") || "/"}</a>
-              </td>
-              <td className="whitespace-nowrap py-1.5 text-right">{l.dofollow ? "dofollow" : <span className="text-muted-foreground">nofollow</span>}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <Table containerClassName="rounded-none border-0">
+        <THead><TR><TH>Linking page</TH><TH>Anchor</TH><TH>Target</TH><TH>Type</TH><TH className="text-right">DR</TH><TH>First seen</TH></TR></THead>
+        <TBody>{paged.items.map((l, i) => (
+          <TR key={`${l.url_from}|${l.anchor}|${i}`} className="align-top">
+            <TD className="max-w-sm">
+              <div className="text-xs font-medium">{l.referring_domain}</div>
+              {l.page_title && <div className="truncate text-xs text-muted-foreground" title={l.page_title}>{l.page_title}</div>}
+              <a className="block truncate text-xs text-primary hover:underline" href={l.url_from} target="_blank" rel="noreferrer" title={l.url_from}>{l.url_from}</a>
+            </TD>
+            <TD className="max-w-xs text-xs">
+              {l.anchor ? <span title={l.anchor}>“{l.anchor}”</span> : <span className="italic text-muted-foreground">no anchor text (image or empty)</span>}
+            </TD>
+            <TD className="max-w-[12rem] text-xs">
+              <span className="text-muted-foreground">→ </span>
+              <a className="text-primary hover:underline" href={l.url_to} target="_blank" rel="noreferrer" title={l.url_to}>{l.url_to.replace(/^https?:\/\/[^/]+/, "") || "/"}</a>
+            </TD>
+            <TD className="text-xs">{l.dofollow ? <Badge variant="success">dofollow</Badge> : <Badge variant="muted">nofollow</Badge>}</TD>
+            <TD className="text-right tabular-nums text-xs">{l.domain_rating != null ? fmtNum(l.domain_rating, 0) : "—"}</TD>
+            <TD className="whitespace-nowrap text-xs text-muted-foreground">{l.first_seen ?? "—"}</TD>
+          </TR>
+        ))}
+        </TBody>
+      </Table>
       <Pagination state={paged} label="links" />
     </div>
   );
 }
 
-interface RankRow { id: string; text: string; position: number | null; url: string | null; serp_features: string[]; change: number | null; is_new: boolean; lost: boolean }
+interface RankRow { id: string; engine: string; text: string; position: number | null; url: string | null; serp_features: string[]; change: number | null; is_new: boolean; lost: boolean }
 interface Rankings {
   available: boolean; reason?: string; connected_provider?: string | null; observed_on?: string; previous_observed_on?: string | null;
   provider?: string; providers?: string[];
@@ -800,12 +758,13 @@ interface Rankings {
 }
 
 /** Where the target keywords actually sit, including the ones we rank nowhere for. */
-function RankingsTab({ pid, domain }: { pid: string; domain: Domain }) {
+function RankingsTab({ pid, domain, engine }: { pid: string; domain: Domain; engine: string }) {
   // One engine at a time: Google and Bing positions describe different result pages, so the API never pools them.
-  const [engine, setEngine] = useState("");
+  // The engine picker lives in the page header; this reads the chosen value via the `engine` prop.
   const [filter, setFilter] = useState({ q: "", status: "" });
   const { data, isLoading } = useQuery({ queryKey: ["rankings", pid, domain.id, engine], queryFn: () => api.get<Rankings>(`/projects/${pid}/seo/domains/${domain.id}/rankings${engine ? `?provider_key=${engine}` : ""}`), refetchInterval: 30000 });
   const filtered = useMemo(() => (data?.keywords ?? []).filter((row) => {
+    if (engine && row.engine !== engine) return false;
     if (filter.q && !row.text.toLowerCase().includes(filter.q.toLowerCase())) return false;
     if (filter.status === "ranking" && row.position == null) return false;
     if (filter.status === "absent" && row.position != null) return false;
@@ -813,10 +772,11 @@ function RankingsTab({ pid, domain }: { pid: string; domain: Domain }) {
     if (filter.status === "new" && !row.is_new) return false;
     if (filter.status === "lost" && !row.lost) return false;
     return true;
-  }), [data?.keywords, filter]);
+  }), [data?.keywords, filter, engine]);
   const paged = usePaged(filtered);
   const columns: CsvColumn<RankRow>[] = [
     { key: "keyword", label: "Keyword", value: (row) => row.text },
+    { key: "engine", label: "Search engine", value: (row) => row.engine },
     { key: "position", label: "Position", value: (row) => row.position },
     { key: "change", label: "Change", value: (row) => row.change },
     { key: "new", label: "New", value: (row) => row.is_new },
@@ -835,16 +795,6 @@ function RankingsTab({ pid, domain }: { pid: string; domain: Domain }) {
   const t = data.totals!;
   return (
     <div className="space-y-6">
-      {(data.providers?.length ?? 0) > 1 && (
-        <div className="flex items-center gap-2 text-sm">
-          <span className="text-muted-foreground">Search engine</span>
-          <Select className="w-64" value={data.provider ?? ""} onChange={(e) => setEngine(e.target.value)}>
-            {data.providers!.map((k) => <option key={k} value={k}>{k}</option>)}
-          </Select>
-          <InfoHint width="w-80">Each engine is measured and stored separately — a position on Bing is a different
-            result page from a position on Google, so they are never averaged together.</InfoHint>
-        </div>
-      )}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <Metric className={BORDERLESS_METRIC} label="Ranking" value={`${fmtInt(t.ranking)} / ${fmtInt(t.checked)}`} source={`${fmtInt(t.absent)} not found`} hint="Keywords where your site appeared anywhere in the checked SERP depth." />
         <Metric className={BORDERLESS_METRIC} label="Top 10" value={fmtInt(t.top_10)} source="first page" />
@@ -855,29 +805,24 @@ function RankingsTab({ pid, domain }: { pid: string; domain: Domain }) {
         <Card>
           <CardHeader><CardTitle info="Average position counts only keywords you rank for, so a newly-ranking keyword can push the average down while things improve.">Rankings over time</CardTitle></CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={200}>
-              <AreaChart data={data.history}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#eef2f7" />
-                <XAxis dataKey="date" tick={{ fontSize: 11 }} tickFormatter={(d) => String(d).slice(5)} />
-                <YAxis tick={{ fontSize: 11 }} /><Tooltip />
-                <Area type="monotone" dataKey="ranking" stroke="#2563eb" fill="#bfdbfe" name="Keywords ranking" />
-              </AreaChart>
-            </ResponsiveContainer>
+            <TimeSeriesChart data={data.history ?? []} xKey="date" xTickFormatter={(d) => String(d).slice(5)}
+              series={[{ key: "ranking", label: "Keywords ranking", color: "#2563eb", fill: "#bfdbfe", area: true }]} />
           </CardContent>
         </Card>
       )}
       <div>
         <div className="mb-3 flex flex-wrap gap-2">
-          <Input className="max-w-sm" placeholder="Filter keywords…" value={filter.q} onChange={(e) => setFilter({ ...filter, q: e.target.value })} />
           <Select className="w-36" value={filter.status} onChange={(e) => setFilter({ ...filter, status: e.target.value })}><option value="">All statuses</option><option value="ranking">Ranking</option><option value="absent">Absent</option><option value="top10">Top 10</option><option value="new">New</option><option value="lost">Lost</option></Select>
-          <InfoHint>“Absent” means the SERP was checked and your site was not in it — which is a result, not a gap in the data.</InfoHint>
+          <SearchBox className="w-[32rem]" placeholder="Filter keywords…" value={filter.q} onSearch={(v) => setFilter({ ...filter, q: v })} />
+          <InfoHint>“Absent” means the SERP was checked and your site was not in it — which is a result, not a gap in the data. Each engine is measured separately, so a position on Bing is a different result page from one on Google.</InfoHint>
           <div className="ml-auto"><CsvExportButton filename={`${domain.hostname}-rankings.csv`} rows={filtered} columns={columns} /></div>
         </div>
           <Table containerClassName="rounded-none border-0">
-            <THead><TR><TH>Keyword</TH><TH className="text-right">Position</TH><TH>Change</TH><TH>Ranking URL</TH><TH>SERP features</TH></TR></THead>
+            <THead><TR><TH>Keyword</TH><TH>Engine</TH><TH className="text-right">Position</TH><TH>Change</TH><TH>Ranking URL</TH><TH>SERP features</TH></TR></THead>
             <TBody>{paged.items.map((k) => (
-              <TR key={k.id}>
+              <TR key={`${k.id}-${k.engine}`}>
                 <TD className="text-sm">{k.text}</TD>
+                <TD className="text-xs text-muted-foreground">{k.engine}</TD>
                 <TD className="text-right tabular-nums">{k.position ?? <span className="text-xs text-muted-foreground">absent</span>}</TD>
                 <TD className="text-xs">
                   {k.is_new ? <Badge variant="success">new</Badge>
@@ -920,8 +865,8 @@ function HistoryTab({ pid, domain }: { pid: string; domain: Domain }) {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap gap-2">
-        <Input className="max-w-sm" placeholder="Filter by crawl date…" value={filter.q} onChange={(e) => setFilter({ ...filter, q: e.target.value })} />
         <Input type="number" min={0} max={10} className="w-32" placeholder="Min score" value={filter.minScore} onChange={(e) => setFilter({ ...filter, minScore: e.target.value })} />
+        <SearchBox className="w-[32rem]" placeholder="Filter by crawl date…" value={filter.q} onSearch={(v) => setFilter({ ...filter, q: v })} />
         <div className="ml-auto"><CsvExportButton filename={`${domain.hostname}-crawl-history.csv`} rows={filteredRuns} columns={columns} /></div>
       </div>
       <Table containerClassName="rounded-none border-0">

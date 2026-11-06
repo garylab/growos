@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import Principal, get_principal, get_project
 from app.core.db import get_db
 from app.intelligence.playbook import mark_complete, plan_summary, undo_complete
+from app.intelligence.scorecard import INDEX_LEVERS
 from app.models import ActionRecord, PlanItem, Project, ProjectMember, User
 from app.models.plan import PLAN_STATUSES
 from app.queue import get_queue
@@ -38,13 +39,27 @@ class AssignIn(BaseModel):
     due_date: datetime | None = None
 
 
+# The scorecard indexes each plan category feeds. Reverse of scorecard.INDEX_LEVERS, so a plan item can
+# say which parts of the brand it moves. Labels mirror the Index(...) titles in scorecard.py.
+_INDEX_LABELS = {
+    "brand_influence": "Brand Influence",
+    "brand_competitiveness": "Brand Competitiveness",
+    "monetization": "Monetization Readiness",
+}
+
+
+def _affects(category: str) -> list[dict]:
+    return [{"key": key, "label": _INDEX_LABELS.get(key, key)}
+            for key, cats in INDEX_LEVERS.items() if category in cats]
+
+
 def _out(i: PlanItem, people: dict[uuid.UUID, dict] | None = None) -> dict:
     now = datetime.now(UTC)
     assignee = (people or {}).get(i.assignee_id) if i.assignee_id else None
     return {
         "assignee_id": str(i.assignee_id) if i.assignee_id else None, "assignee": assignee, "due_date": i.due_date,
         "confidence": i.confidence, "score_breakdown": i.score_breakdown, "origin": i.origin,
-        "target_urls": i.target_urls, "target_keywords": i.target_keywords, "history": i.history,"id": str(i.id), "key": i.key, "section": i.section, "cadence": i.cadence, "category": i.category, "title": i.title, "why": i.why,
+        "target_urls": i.target_urls, "target_keywords": i.target_keywords, "history": i.history, "affects": _affects(i.category),"id": str(i.id), "key": i.key, "section": i.section, "cadence": i.cadence, "category": i.category, "title": i.title, "why": i.why,
             "steps": i.steps, "suggestions": i.suggestions, "evidence": i.evidence, "impact": i.impact, "effort": i.effort, "priority": i.priority,
             "status": i.status, "completions": i.completions, "next_due_at": i.next_due_at, "last_done_at": i.last_done_at, "resolved_at": i.resolved_at,
             "source": i.source, "note": i.note, "updated_at": i.updated_at,

@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { Badge, StatusBadge } from "@/components/ui/badge";
 import { Field, Input, PasswordInput, Select } from "@/components/ui/input";
+import { SearchBox } from "@/components/ui/search-box";
 import { EmptyState, ErrorBox, Loading, PageHeader } from "@/components/ui/misc";
 import { Pagination, usePaged } from "@/components/ui/pagination";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
@@ -71,7 +72,7 @@ export function TeamPage() {
         <Card>
           <CardHeader><CardTitle info={ROLE_HELP}>Members of this project</CardTitle></CardHeader>
           <CardContent>
-            <div className="mb-3 flex gap-2"><Input className="max-w-sm" placeholder="Filter members…" value={memberFilter} onChange={(e) => setMemberFilter(e.target.value)} /><div className="ml-auto"><CsvExportButton filename="project-members.csv" rows={memberRows} columns={MEMBER_COLUMNS} /></div></div>
+            <div className="mb-3 flex gap-2"><SearchBox className="w-[32rem]" placeholder="Filter members…" value={memberFilter} onSearch={setMemberFilter} /><div className="ml-auto"><CsvExportButton filename="project-members.csv" rows={memberRows} columns={MEMBER_COLUMNS} /></div></div>
             {!members?.length ? <EmptyState title="No members yet">{isAdmin ? "Add a person to share this project with them." : "Ask an administrator to add people."}</EmptyState> : (
               <Table>
                 <THead><TR><TH>Person</TH><TH>Role</TH><TH>Added</TH><TH /></TR></THead>
@@ -116,7 +117,7 @@ export function TeamPage() {
           <Card>
             <CardHeader><CardTitle info="Everyone who can sign in. Roles are set per project in the table above; admin is account-wide.">All accounts</CardTitle></CardHeader>
             <CardContent>
-              <div className="mb-3 flex gap-2"><Input className="max-w-sm" placeholder="Filter accounts…" value={userFilter} onChange={(e) => setUserFilter(e.target.value)} /><div className="ml-auto"><CsvExportButton filename="accounts.csv" rows={userRows} columns={USER_COLUMNS} /></div></div>
+              <div className="mb-3 flex gap-2"><SearchBox className="w-[32rem]" placeholder="Filter accounts…" value={userFilter} onSearch={setUserFilter} /><div className="ml-auto"><CsvExportButton filename="accounts.csv" rows={userRows} columns={USER_COLUMNS} /></div></div>
               {usersError ? <ErrorBox error={usersError} /> : !users?.length ? <EmptyState title="No accounts yet">Add the first person to replace token sign-in.</EmptyState> : (
                 <Table>
                   <THead><TR><TH>Person</TH><TH>Role</TH><TH>Status</TH><TH>Last signed in</TH><TH /></TR></THead>

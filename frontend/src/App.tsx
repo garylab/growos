@@ -69,13 +69,13 @@ function Gate() {
     <Routes>
       <Route path="/setup" element={<Setup />} />
       <Route element={<AppShell />}>
-        {/* Overview is the landing page; both it and the plan have their own URL. */}
-        <Route index element={<Navigate to="/overview" replace />} />
-        <Route path="/overview" element={<Overview />} />
+        {/* Overview is the home page. Keep the old URL as a redirect for existing bookmarks. */}
+        <Route index element={<Overview />} />
+        <Route path="/overview" element={<Navigate to="/" replace />} />
         <Route path="/plan" element={<PlanPage />} />
-        <Route path="/scorecard" element={<Navigate to="/overview" replace />} />
+        <Route path="/scorecard" element={<Navigate to="/" replace />} />
         <Route path="/seo/:tab?/:view?" element={<SeoPage />} />
-        <Route path="/ai-visibility/:tab?" element={<AIVisibilityPage />} />
+        <Route path="/geo/:tab?" element={<AIVisibilityPage />} />
         <Route path="/brand/:tab?" element={<BrandPage />} />
         <Route path="/competitors/:tab?" element={<CompetitorsPage />} />
         <Route path="/actions" element={<ActionsPage />} />
@@ -84,7 +84,7 @@ function Gate() {
         <Route path="/team" element={<TeamPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/profile" element={<ProfilePage />} />
-        <Route path="*" element={<Navigate to="/overview" replace />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>
   );

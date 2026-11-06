@@ -87,4 +87,14 @@ def _analytics_block(db: Session, domain_id) -> dict:
     cur = totals(today - timedelta(days=28), today)
     if cur["sessions"] == 0 and not db.scalar(select(func.count()).select_from(AnalyticsEvent).where(AnalyticsEvent.domain_id == domain_id)):
         return {"available": False}
-    return {"available": True, "totals": cur, "previous": totals(today - timedelta(days=56), today - timedelta(days=28))}
+    daily = db.execute(select(AnalyticsEvent.date, func.sum(AnalyticsEvent.sessions),
+                              func.sum(AnalyticsEvent.users), func.sum(AnalyticsEvent.conversions),
+                              func.sum(AnalyticsEvent.engagement_time_sec))
+                       .where(AnalyticsEvent.domain_id == domain_id,
+                              AnalyticsEvent.date >= today - timedelta(days=28), AnalyticsEvent.date < today)
+                       .group_by(AnalyticsEvent.date).order_by(AnalyticsEvent.date)).all()
+    return {"available": True, "totals": cur, "previous": totals(today - timedelta(days=56), today - timedelta(days=28)),
+            "daily": [{"date": d.isoformat(), "sessions": int(s or 0), "users": int(u or 0), "conversions": int(c or 0),
+                       # GA4 average engagement time per session for the day.
+                       "avg_engagement_seconds": (float(e or 0) / int(s)) if s else 0.0}
+                      for d, s, u, c, e in daily]}

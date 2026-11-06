@@ -1,7 +1,6 @@
 import { TrendingUp } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { Area, AreaChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { ReactNode } from "react";
 import { api } from "@/lib/api";
 import { useProjectId } from "@/hooks/useProject";
@@ -11,6 +10,7 @@ import { delta, fmtInt, fmtNum, fmtPct } from "@/lib/utils";
 import { fmtDay, fmtDuration } from "@/lib/time";
 import { TimeAgo } from "@/components/ui/time";
 import { ScorecardSection, useScorecard } from "@/pages/Scorecard";
+import { TimeSeriesChart, type ChartSeries } from "@/components/ui/timeseries-chart";
 
 /** Small uppercase section label with an optional click-to-reveal explanation. */
 function SectionHeading({ children, info }: { children: ReactNode; info?: ReactNode }) {
@@ -21,9 +21,33 @@ function SectionHeading({ children, info }: { children: ReactNode; info?: ReactN
   );
 }
 
+type VisitorsDay = { date: string; sessions: number; users: number; conversions: number; avg_engagement_seconds: number };
+
+const VISITOR_SERIES: ChartSeries[] = [
+  { key: "users", label: "Users", color: "#2563eb" },
+  { key: "sessions", label: "Sessions", color: "#16a34a" },
+  { key: "conversions", label: "Conversions", color: "#d97706" },
+  { key: "avg_engagement_seconds", label: "Avg. engagement", color: "#9333ea", axis: "right" },
+];
+
+/** Daily GA4 visitors. Click a series button to hide or show that line; avg. engagement rides a second axis. */
+function VisitorsChart({ daily }: { daily: VisitorsDay[] }) {
+  const rows = daily.map((r) => ({ t: fmtDay(r.date), users: r.users, sessions: r.sessions, conversions: r.conversions, avg_engagement_seconds: Math.round(r.avg_engagement_seconds) }));
+  return (
+    <Card className="mb-6">
+      <CardHeader><CardTitle info="Daily GA4 users, sessions, conversions and average engagement over the last 28 days. Click a series to hide or show its line; the axes rescale to what is shown.">Visitors</CardTitle></CardHeader>
+      <CardContent>
+        <TimeSeriesChart data={rows} xKey="t" series={VISITOR_SERIES} height={220}
+          rightTickFormatter={(v) => `${v}s`}
+          tooltipFormatter={(value, name) => (name === "Avg. engagement" ? [`${value}s`, name] : [value, name])} />
+      </CardContent>
+    </Card>
+  );
+}
+
 interface OverviewData {
   project: { name: string; brand_name: string };
-  seo: { domain_id: string; hostname: string; gsc_property: string | null; crawl: { run_id: string; finished_at: string; overall_score: number | null; categories: Record<string, number>; findings_count: Record<string, number>; html_pages: number; total_urls: number } | null; search: { available: boolean; totals?: { clicks: number; impressions: number; ctr: number; position: number }; previous?: { clicks: number; impressions: number; ctr: number; position: number }; daily?: { date: string; clicks: number; impressions: number }[] }; analytics: { available: boolean; totals?: AnalyticsTotals; previous?: AnalyticsTotals } }[];
+  seo: { domain_id: string; hostname: string; gsc_property: string | null; crawl: { run_id: string; finished_at: string; overall_score: number | null; categories: Record<string, number>; findings_count: Record<string, number>; html_pages: number; total_urls: number } | null; search: { available: boolean; totals?: { clicks: number; impressions: number; ctr: number; position: number }; previous?: { clicks: number; impressions: number; ctr: number; position: number }; daily?: { date: string; clicks: number; impressions: number }[] }; analytics: { available: boolean; totals?: AnalyticsTotals; previous?: AnalyticsTotals; daily?: { date: string; sessions: number; users: number; conversions: number; avg_engagement_seconds: number }[] } }[];
   geo: { current: GeoSummary | null; previous: GeoSummary | null; runs_history: GeoSummary[]; ai_traffic?: { available: boolean; sessions: number; previous_sessions: number; share_of_sessions: number; by_assistant: { assistant: string; sessions: number }[] } };
   brand: { mentions: Record<string, number>; total: number; with_intent: number };
   opportunities: { counts: Record<string, number>; top: { id: string; title: string; module: string; priority_score: number; impact_score: number; confidence: number; effort: number; recommended_action: string; status: string }[] };
@@ -81,16 +105,10 @@ export function Overview() {
         <Card className="mb-6">
           <CardHeader><CardTitle info="Source: Google Search Console (first-party).">Clicks & impressions, last 90 days</CardTitle></CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={200}>
-              <AreaChart data={primary.search.daily}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#eef2f7" />
-                <XAxis dataKey="date" tick={{ fontSize: 11 }} tickFormatter={(d) => d.slice(5)} />
-                <YAxis yAxisId="l" tick={{ fontSize: 11 }} /><YAxis yAxisId="r" orientation="right" tick={{ fontSize: 11 }} />
-                <Tooltip />
-                <Area yAxisId="r" type="monotone" dataKey="impressions" stroke="#94a3b8" fill="#e2e8f0" name="Impressions" />
-                <Area yAxisId="l" type="monotone" dataKey="clicks" stroke="#2563eb" fill="#bfdbfe" name="Clicks" />
-              </AreaChart>
-            </ResponsiveContainer>
+            <TimeSeriesChart data={primary.search.daily} xKey="date" xTickFormatter={(d) => String(d).slice(5)} series={[
+              { key: "impressions", label: "Impressions", color: "#94a3b8", fill: "#e2e8f0", area: true, axis: "right" },
+              { key: "clicks", label: "Clicks", color: "#2563eb", fill: "#bfdbfe", area: true },
+            ]} />
           </CardContent>
         </Card>
       )}
@@ -104,6 +122,7 @@ export function Overview() {
             <Metric label="Conversion rate" value={fmtPct(primary.analytics.totals?.conversion_rate)} change={delta(primary.analytics.totals?.conversion_rate, primary.analytics.previous?.conversion_rate)} source="conversions / sessions" />
             <Metric label="Avg. engagement" value={fmtDuration(primary.analytics.totals?.avg_engagement_seconds)} change={delta(primary.analytics.totals?.avg_engagement_seconds, primary.analytics.previous?.avg_engagement_seconds)} source={`${fmtPct(primary.analytics.totals?.engagement_rate, 0)} of sessions engaged`} hint="GA4 average engagement time per session: total engagement time ÷ sessions." />
           </div>
+          {(primary.analytics.daily?.length ?? 0) > 1 && <VisitorsChart daily={primary.analytics.daily!} />}
         </>
       )}
       <SectionHeading info="Sampled by querying AI assistants via their provider APIs and inspecting the answers.">GEO AI visibility</SectionHeading>
@@ -127,19 +146,16 @@ export function Overview() {
             />
           </>
         ) : (
-          <Card className="col-span-2 lg:col-span-4"><CardContent className="py-6 text-sm text-muted-foreground">No run yet. <Link className="text-primary underline" to="/ai-visibility">Run GEO AI Visibility</Link>.</CardContent></Card>
+          <Card className="col-span-2 lg:col-span-4"><CardContent className="py-6 text-sm text-muted-foreground">No run yet. <Link className="text-primary underline" to="/geo">Run GEO AI Visibility</Link>.</CardContent></Card>
         )}
       </div>
       {data.geo.runs_history.length > 1 && (
         <Card className="mb-6">
           <CardHeader><CardTitle info="Each point is one sampling run across all prompts and providers.">Brand mention rate</CardTitle></CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={180}>
-              <LineChart data={[...data.geo.runs_history].reverse().map((r) => ({ t: r.observed_at ? fmtDay(r.observed_at) : "", rate: (r.brand_mention_rate ?? 0) * 100 }))}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#eef2f7" /><XAxis dataKey="t" tick={{ fontSize: 11 }} /><YAxis domain={[0, 100]} tick={{ fontSize: 11 }} unit="%" /><Tooltip />
-                <Line type="monotone" dataKey="rate" stroke="#7c3aed" name="Brand mention %" />
-              </LineChart>
-            </ResponsiveContainer>
+            <TimeSeriesChart height={180} xKey="t" leftMaxCap={100} leftTickFormatter={(v) => `${v}%`}
+              data={[...data.geo.runs_history].reverse().map((r) => ({ t: r.observed_at ? fmtDay(r.observed_at) : "", rate: Math.round((r.brand_mention_rate ?? 0) * 100) }))}
+              series={[{ key: "rate", label: "Brand mention %", color: "#7c3aed" }]} />
           </CardContent>
         </Card>
       )}
@@ -176,7 +192,7 @@ export function Overview() {
                 {data.opportunities.top.map((o) => (
                   <li key={o.id} className="flex items-baseline gap-3 leading-tight">
                     <span className="w-12 shrink-0 text-right text-lg font-semibold tabular-nums text-primary">{o.priority_score.toFixed(0)}</span>
-                    <Link to="/plan" className="min-w-0 font-medium hover:underline">{o.title}</Link>
+                    <Link to="/plan" className="min-w-0 hover:underline">{o.title}</Link>
                   </li>
                 ))}
               </ol>

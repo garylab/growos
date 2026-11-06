@@ -3,17 +3,18 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { Plus } from "lucide-react";
 import { api, type Competitor, type Job, type Prompt } from "@/lib/api";
-import { useCompetitors, useDomains, useProjectId } from "@/hooks/useProject";
+import { useCompetitors, useProject, useProjectId } from "@/hooks/useProject";
 import { useActiveTab } from "@/hooks/useTabRoute";
 import { GEO_TABS } from "@/lib/nav";
 import { EmptyState, ErrorBox, InfoHint, Loading, Metric, PageHeader } from "@/components/ui/misc";
 import { Pagination, usePaged } from "@/components/ui/pagination";
-import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { TimeSeriesChart } from "@/components/ui/timeseries-chart";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Field, Input, Select, Textarea } from "@/components/ui/input";
+import { SearchBox } from "@/components/ui/search-box";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { delta, fmtInt, fmtPct } from "@/lib/utils";
 import { fmtRelative } from "@/lib/time";
@@ -43,13 +44,6 @@ const AI_LANDING_COLUMNS: CsvColumn<AILandingPage>[] = [
   { key: "page", label: "Landing page", value: (r) => r.landing_page }, { key: "visits", label: "Visits", value: (r) => r.sessions },
   { key: "conversions", label: "Conversions", value: (r) => r.conversions },
 ];
-interface CrawlerVerdict { token: string; operator: string; purpose: string; what: string; allowed: boolean; matched_group: string; matched_rule: string | null; explicit: boolean }
-interface CrawlerAccess {
-  available: boolean; reason?: string; checked?: boolean; status?: string; detail?: string; url?: string; status_code?: number;
-  checked_at?: string | null; crawlers?: CrawlerVerdict[];
-  blocked_answers?: string[]; blocked_search?: string[]; blocked_training?: string[];
-  partially_blocked?: Record<string, string[]>; allowed_count?: number;
-}
 interface Citations { run_id: string | null; total_answers: number; domains: { domain: string; citations: number; answers: number; providers: string[]; sample_urls: string[] }[] }
 type CitationDomain = Citations["domains"][number];
 const PROMPT_ROW_COLUMNS: CsvColumn<PromptRow>[] = [
@@ -86,6 +80,16 @@ const RUN_COLUMNS: CsvColumn<Summary>[] = [
 ];
 
 
+/** Per-tab page heading and its info tooltip, keyed by the tab id from GEO_TABS. */
+const GEO_TAB_META: Record<string, { title: string; info: string }> = {
+  "visibility": { title: "Visibility", info: "How often AI assistants mention your brand and competitors for the prompts your customers ask. Measured by repeated API sampling (OpenAI, Gemini, Perplexity…), not by scraping consumer apps." },
+  "ai-traffic": { title: "AI traffic", info: "Visits your site received from AI assistants, read from your connected analytics." },
+  "answers": { title: "Answers", info: "The individual AI answers collected, with their citations and grounding." },
+  "influencing-sources": { title: "Influencing sources", info: "The domains most often cited in AI answers about your topics." },
+  "prompts": { title: "Prompts", info: "The customer-style questions sampled against each AI provider." },
+  "runs": { title: "Run History", info: "Each sampling run across all prompts and providers, over time." },
+};
+
 export function AIVisibilityPage() {
   const pid = useProjectId();
   const qc = useQueryClient();
@@ -98,17 +102,17 @@ export function AIVisibilityPage() {
   return (
     <div>
       <PageHeader
-        title="GEO AI Visibility"
-        info="How often AI assistants mention your brand and competitors for the prompts your customers ask. Measured by repeated API sampling (OpenAI, Gemini, Perplexity…), not by scraping consumer apps."
+        title={GEO_TAB_META[tab]?.title ?? "GEO AI Visibility"}
+        info={GEO_TAB_META[tab]?.info ?? "How often AI assistants mention your brand and competitors for the prompts your customers ask."}
         actions={<>
           {tab === "ai-traffic" && <Select className="w-36" value={trafficDays} onChange={(e) => setTrafficDays(Number(e.target.value))}>{[28, 90, 180, 365].map((n) => <option key={n} value={n}>Last {n} days</option>)}</Select>}
-          {tab !== "ai-traffic" && <Button variant="outline" onClick={() => setAdding(true)}>Add prompts</Button>}
+          {tab === "prompts" && <Button variant="outline" onClick={() => setAdding(true)}>Add prompts</Button>}
           <Button onClick={() => run.mutate({})} disabled={run.isPending || !prompts?.length}>Re-run</Button>
         </>}
       />
       <ErrorBox error={run.error} />
       {run.data && <div className="mb-4 text-sm text-muted-foreground">Job queued ({run.data.id.slice(0, 8)})…</div>}
-      {tab === "visibility" && <div className="space-y-6"><CrawlerAccessCard pid={pid} /><VisibilityTab pid={pid} /></div>}
+      {tab === "visibility" && <VisibilityTab pid={pid} />}
       {tab === "ai-traffic" && <AITrafficTab pid={pid} days={trafficDays} />}
       {tab === "answers" && <AnswersTab pid={pid} prompts={prompts ?? []} />}
       {tab === "influencing-sources" && <SourcesTab pid={pid} />}
@@ -121,7 +125,9 @@ export function AIVisibilityPage() {
 
 function VisibilityTab({ pid }: { pid: string }) {
   const [filter, setFilter] = useState("");
+  const { data: project } = useProject();
   const { data, isLoading } = useQuery({ queryKey: ["visibility", pid], queryFn: () => api.get<Visibility>(`/projects/${pid}/geo/visibility`), refetchInterval: 15000 });
+  const { data: runs } = useQuery({ queryKey: ["geo-runs", pid], queryFn: () => api.get<Summary[]>(`/projects/${pid}/geo/runs`), refetchInterval: 15000 });
   // Every hook runs before the early returns below, or the hook count changes once data arrives.
   const promptRows = useMemo(() => (data?.by_prompt ?? []).filter((row) => !filter || `${row.prompt} ${row.provider} ${row.intent ?? ""} ${row.topic ?? ""}`.toLowerCase().includes(filter.toLowerCase())), [data?.by_prompt, filter]);
   const pagedPrompts = usePaged(promptRows);
@@ -129,6 +135,19 @@ function VisibilityTab({ pid }: { pid: string }) {
   if (!data?.summary.run_id) return <EmptyState title="No sampling run yet">Add prompts, configure an AI provider under <Link className="text-primary underline" to="/integrations">Integrations</Link>, then run them.</EmptyState>;
   const s = data.summary, p = data.previous;
   const comps = Object.entries(s.competitors);
+  const competitorSeries = [
+    { key: "brand", label: project?.name ?? "Your brand", color: "#7c3aed", width: 3 },
+    ...comps.map(([name], index) => ({
+      key: `competitor_${index}`,
+      label: name,
+      color: ["#f59e0b", "#0ea5e9", "#10b981", "#ef4444", "#8b5cf6", "#ec4899", "#14b8a6", "#64748b"][index % 8],
+    })),
+  ];
+  const competitorHistory = [...(runs ?? [])].reverse().map((run) => ({
+    observed_at: run.observed_at ?? "",
+    brand: Math.round((run.brand_mention_rate ?? 0) * 1000) / 10,
+    ...Object.fromEntries(comps.map(([name], index) => [`competitor_${index}`, Math.round((run.competitors[name] ?? 0) * 1000) / 10])),
+  }));
   return (
     <div className="space-y-6">
       <div className="flex justify-end -mb-3 text-xs text-muted-foreground items-center gap-1">
@@ -142,23 +161,25 @@ function VisibilityTab({ pid }: { pid: string }) {
         <Metric label="Run" value={<span className="text-base"><TimeAgo value={s.observed_at} /></span>} source={p?.observed_at ? `previous: ${fmtRelative(p.observed_at)}` : "first run"} />
       </div>
       {comps.length > 0 && (
-        <Card><CardHeader><CardTitle info="Mention rate across all prompts and providers in the latest run, compared with the previous run.">Share of voice: competitors in AI answers</CardTitle></CardHeader>
-          <CardContent className="space-y-2">
-            {[["__brand", s.brand_mention_rate ?? 0] as [string, number], ...comps].map(([n, r]) => { const before = n === "__brand" ? p?.brand_mention_rate : p?.competitors[n]; return (
-              <div key={n} className="flex items-center gap-3 text-sm"><span className={`w-40 truncate ${n === "__brand" ? "font-semibold" : ""}`}>{n === "__brand" ? "Your brand" : n}</span><div className="flex-1 h-3 rounded bg-slate-100 dark:bg-slate-800"><div className={`h-3 rounded ${n === "__brand" ? "bg-primary" : "bg-amber-400"}`} style={{ width: `${r * 100}%` }} /></div><span className="w-12 text-right tabular-nums">{fmtPct(r, 0)}</span><span className="w-20 text-xs text-muted-foreground">{before != null ? `was ${fmtPct(before, 0)}` : ""}</span></div>); })}
+        <Card><CardHeader><CardTitle info="Mention rate across all prompts and providers for each sampling run.">Competitors in AI answers</CardTitle></CardHeader>
+          <CardContent>
+            <TimeSeriesChart data={competitorHistory} xKey="observed_at" height={180} leftMaxCap={100}
+              xTickFormatter={(value) => String(value).slice(5, 10)} leftTickFormatter={(value) => `${value}%`}
+              tooltipLabelFormatter={(value) => String(value).slice(0, 10)} tooltipFormatter={(value) => [`${value}%`, undefined]}
+              series={competitorSeries} />
           </CardContent></Card>
       )}
-      <Card>
+      <section>
         <CardHeader><CardTitle info="Rates are the share of repeated samples. “Pos.” is the average order of first appearance among tracked entities (1 = mentioned first). “Shown” is how often the surface produced an answer at all — Google runs no AI Overview for many queries, and a brand rate of 0% across answers that never appeared means something different from being left out of one.">By prompt and provider</CardTitle></CardHeader>
         <CardContent>
-          <div className="mb-3 flex gap-2"><Input className="max-w-sm" placeholder="Filter prompts or providers…" value={filter} onChange={(e) => setFilter(e.target.value)} /><div className="ml-auto"><CsvExportButton filename="ai-visibility-by-prompt.csv" rows={promptRows} columns={PROMPT_ROW_COLUMNS} /></div></div>
+          <div className="mb-3 flex gap-2"><SearchBox className="w-[32rem]" placeholder="Filter prompts or providers…" value={filter} onSearch={setFilter} /><div className="ml-auto"><CsvExportButton filename="ai-visibility-by-prompt.csv" rows={promptRows} columns={PROMPT_ROW_COLUMNS} /></div></div>
           <Table>
             <THead><TR><TH>Prompt</TH><TH>Provider</TH><TH>Samples</TH><TH>Shown</TH><TH>Grounded</TH><TH>Brand</TH><TH>Pos.</TH><TH>Own site cited</TH><TH>Competitors</TH><TH>Top cited domains</TH></TR></THead>
             <TBody>{pagedPrompts.items.map((r) => <TR key={r.prompt_id + r.provider}><TD className="max-w-xs text-xs">{r.prompt}<div className="text-muted-foreground">{r.intent}{r.topic ? ` · ${r.topic}` : ""}</div></TD><TD className="text-xs">{r.provider}<div className="text-muted-foreground">{r.models.join(", ")}</div></TD><TD>{r.samples}</TD><TD className={r.answer_shown < r.samples ? "text-amber-700 dark:text-amber-300" : undefined}>{r.answer_shown}/{r.samples}</TD><TD>{r.grounded_samples}/{r.samples}</TD><TD><Badge variant={r.brand_mention_rate >= 0.5 ? "success" : r.brand_mention_rate > 0 ? "warning" : "danger"}>{fmtPct(r.brand_mention_rate, 0)}</Badge>{r.answer_shown < r.samples && r.brand_mention_rate_when_shown != null && <div className="text-xs text-muted-foreground">{fmtPct(r.brand_mention_rate_when_shown, 0)} of answers shown</div>}</TD><TD className="tabular-nums">{r.brand_avg_position ?? "—"}</TD><TD>{fmtPct(r.own_domain_cited_rate, 0)}</TD><TD className="text-xs">{Object.entries(r.competitors).sort((a, b) => b[1].rate - a[1].rate).map(([n, v]) => <div key={n}>{n} <span className="text-muted-foreground">{fmtPct(v.rate, 0)}{v.avg_position ? ` · pos ${v.avg_position}` : ""}</span></div>)}</TD><TD className="text-xs text-muted-foreground">{r.top_cited_domains.slice(0, 4).map(([d, n]) => `${d} (${n})`).join(", ")}</TD></TR>)}</TBody>
           </Table>
           <Pagination state={pagedPrompts} label="rows" />
         </CardContent>
-      </Card>
+      </section>
     </div>
   );
 }
@@ -171,7 +192,7 @@ function AnswersTab({ pid, prompts }: { pid: string; prompts: Prompt[] }) {
   const paged = usePaged(data);
   return (
     <div className="space-y-3">
-      <div className="flex gap-2"><Select className="w-96" value={f.prompt_id} onChange={(e) => setF({ ...f, prompt_id: e.target.value })}><option value="">All prompts</option>{prompts.map((p) => <option key={p.id} value={p.id}>{p.text.slice(0, 80)}</option>)}</Select><Input className="w-48" placeholder="provider (openai, gemini…)" value={f.provider_key} onChange={(e) => setF({ ...f, provider_key: e.target.value })} /><div className="ml-auto"><CsvExportButton filename="ai-answers.csv" rows={data ?? []} columns={ANSWER_COLUMNS} /></div></div>
+      <div className="flex gap-2"><Select className="w-96" value={f.prompt_id} onChange={(e) => setF({ ...f, prompt_id: e.target.value })}><option value="">All prompts</option>{prompts.map((p) => <option key={p.id} value={p.id}>{p.text.slice(0, 80)}</option>)}</Select><SearchBox className="w-64" placeholder="Search providers…" value={f.provider_key} onSearch={(provider_key) => setF({ ...f, provider_key })} /><div className="ml-auto"><CsvExportButton filename="ai-answers.csv" rows={data ?? []} columns={ANSWER_COLUMNS} /></div></div>
       {isLoading ? <Loading /> : !data?.length ? <EmptyState title="No answers collected yet" /> : (
         <Table>
           <THead><TR><TH>When</TH><TH>Provider / model</TH><TH>Prompt</TH><TH>Grounded</TH><TH>Brand</TH><TH>Mentions</TH><TH>Citations</TH><TH /></TR></THead>
@@ -187,78 +208,6 @@ function AnswersTab({ pid, prompts }: { pid: string; prompts: Prompt[] }) {
         </>}
       </DialogContent>}</Dialog>
     </div>
-  );
-}
-
-/** Whether robots.txt lets the retrieval crawlers in. Shown above the visibility numbers because it is the first
- *  explanation for a brand that is absent from every answer: a page that cannot be fetched cannot be cited. */
-function CrawlerAccessCard({ pid }: { pid: string }) {
-  const { data: domains } = useDomains();
-  const domain = (domains ?? []).find((d) => d.role === "primary");
-  const { data } = useQuery({
-    queryKey: ["ai-crawlers", pid, domain?.id],
-    queryFn: () => api.get<CrawlerAccess>(`/projects/${pid}/seo/domains/${domain!.id}/ai-crawlers`),
-    enabled: !!domain,
-  });
-  if (!data) return null;
-  if (!data.available) return null;
-
-  // An unreadable robots.txt is a different, worse story than a blocked bot, so it gets its own message rather
-  // than being folded into a count of zero blocked crawlers.
-  if (!data.checked) {
-    return (
-      <Card className="border-rose-300 dark:border-rose-900">
-        <CardHeader><CardTitle>AI crawlers cannot read your robots.txt</CardTitle>
-          <CardDescription>{data.detail}</CardDescription></CardHeader>
-        <CardContent className="text-xs text-muted-foreground">
-          {data.url} returned HTTP {data.status_code ?? "?"} · checked <TimeAgo value={data.checked_at} />
-        </CardContent>
-      </Card>
-    );
-  }
-
-  const blocking = [...(data.blocked_answers ?? []), ...(data.blocked_search ?? [])];
-  const partial = Object.entries(data.partially_blocked ?? {});
-  const byToken = new Map((data.crawlers ?? []).map((c) => [c.token, c]));
-  const ok = blocking.length === 0 && partial.length === 0;
-  return (
-    <Card className={ok ? undefined : "border-rose-300 dark:border-rose-900"}>
-      <CardHeader>
-        <CardTitle info="Read from your live robots.txt during the last site audit. Blocking a training crawler costs no visibility and is listed separately; blocking a retrieval crawler removes you from that assistant's answers entirely.">
-          AI crawler access
-        </CardTitle>
-        <CardDescription>
-          {ok
-            ? `All ${data.allowed_count} retrieval crawlers we check may fetch the site.`
-            : `${blocking.length} crawler(s) that AI assistants answer from are blocked by robots.txt.`}
-          {" "}Checked <TimeAgo value={data.checked_at} />.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        {blocking.length > 0 && (
-          <Table>
-            <THead><TR><TH>Crawler</TH><TH>Operator</TH><TH>What this costs</TH><TH>Rule</TH></TR></THead>
-            <TBody>{blocking.map((t) => { const c = byToken.get(t); return (
-              <TR key={t}>
-                <TD className="text-xs font-medium">{t}</TD>
-                <TD className="text-xs text-muted-foreground">{c?.operator}</TD>
-                <TD className="text-xs">{c?.what}</TD>
-                <TD className="text-xs font-mono text-muted-foreground">{c?.matched_rule ?? "—"}{c?.explicit === false ? " (via *)" : ""}</TD>
-              </TR>); })}</TBody>
-          </Table>
-        )}
-        {partial.map(([token, paths]) => (
-          <p key={token} className="text-xs text-muted-foreground">
-            <span className="font-medium">{token}</span> may fetch the home page but is blocked from {paths.length} crawled path(s): {paths.slice(0, 5).join(", ")}{paths.length > 5 ? "…" : ""}
-          </p>
-        ))}
-        {(data.blocked_training ?? []).length > 0 && (
-          <p className="text-xs text-muted-foreground">
-            Opted out of model training: {(data.blocked_training ?? []).join(", ")}. That is a policy choice and does not affect whether assistants can cite you.
-          </p>
-        )}
-      </CardContent>
-    </Card>
   );
 }
 
@@ -279,7 +228,7 @@ function AITrafficTab({ pid, days }: { pid: string; days: number }) {
           {Object.entries(data?.methodology ?? {}).map(([k, v]) => <p key={k} className="mt-1 first:mt-0"><span className="font-medium">{k}:</span> {v}</p>)}
           {d.definitions?.caveat && <p className="mt-1">{d.definitions.caveat}</p>}
         </InfoHint>
-        <Input className="w-56" placeholder="Filter traffic rows…" value={filter} onChange={(e) => setFilter(e.target.value)} />
+        <SearchBox className="w-[28rem]" placeholder="Filter traffic rows…" value={filter} onSearch={setFilter} />
       </div>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <Metric label="Visits from AI assistants" value={fmtInt(d.sessions)} change={delta(d.sessions, d.previous_sessions)} source={`vs previous ${d.days} days`} hint="Sessions whose referrer is a known AI assistant." />
@@ -294,10 +243,10 @@ function AITrafficTab({ pid, days }: { pid: string; days: number }) {
       )}
       {d.daily.length > 1 && (
         <Card><CardHeader><CardTitle info="Source: your analytics, session source/medium.">AI assistant visits over time</CardTitle></CardHeader>
-          <CardContent><ResponsiveContainer width="100%" height={180}>
-            <AreaChart data={d.daily}><CartesianGrid strokeDasharray="3 3" stroke="#eef2f7" /><XAxis dataKey="date" tick={{ fontSize: 11 }} tickFormatter={(v) => String(v).slice(5)} /><YAxis tick={{ fontSize: 11 }} /><Tooltip />
-              <Area type="monotone" dataKey="sessions" stroke="#7c3aed" fill="#ddd6fe" name="Visits" /></AreaChart>
-          </ResponsiveContainer></CardContent></Card>
+          <CardContent>
+            <TimeSeriesChart data={d.daily} xKey="date" height={180} xTickFormatter={(v) => String(v).slice(5)}
+              series={[{ key: "sessions", label: "Visits", color: "#7c3aed", fill: "#ddd6fe", area: true }]} />
+          </CardContent></Card>
       )}
       <div className="grid lg:grid-cols-2 gap-4">
         <Card><CardHeader className="flex-row items-center justify-between space-y-0"><CardTitle>Which assistant sent them</CardTitle><CsvExportButton filename="ai-traffic-by-assistant.csv" rows={assistants} columns={ASSISTANT_TRAFFIC_COLUMNS} /></CardHeader><CardContent>
@@ -322,9 +271,9 @@ function SourcesTab({ pid }: { pid: string }) {
   if (isLoading) return <Loading />;
   if (!data?.domains.length) return <EmptyState title="No citations yet">Citations come only from grounded answers (OpenAI web search, Gemini Google Search, Perplexity).</EmptyState>;
   return (
-    <Card><CardHeader><CardTitle info="Earning accurate coverage on these sites improves how AI describes you. If a domain is a rival product, add it as a competitor to track its share of voice.">Websites that influence AI answers</CardTitle><CardDescription>Cited across {data.total_answers} answers in the latest run.</CardDescription></CardHeader>
-      <CardContent><div className="mb-3 flex gap-2"><Input className="max-w-sm" placeholder="Filter domains or providers…" value={filter} onChange={(e) => setFilter(e.target.value)} /><div className="ml-auto"><CsvExportButton filename="ai-influencing-sources.csv" rows={domains} columns={SOURCE_COLUMNS} /></div></div><Table><THead><TR><TH>Domain</TH><TH>Citations</TH><TH>Answers</TH><TH>Providers</TH><TH>Example URLs</TH><TH /></TR></THead>
-        <TBody>{pagedDomains.items.map((d) => <TR key={d.domain}><TD className="font-medium">{d.domain}</TD><TD>{d.citations}</TD><TD>{d.answers}</TD><TD className="text-xs">{d.providers.join(", ")}</TD><TD className="text-xs">{d.sample_urls.map((u) => <div key={u}><a className="text-primary hover:underline truncate block max-w-md" href={u} target="_blank" rel="noreferrer">{u}</a></div>)}</TD><TD className="text-right whitespace-nowrap"><AddCompetitorButton pid={pid} domain={d.domain} competitors={competitors ?? []} /></TD></TR>)}</TBody></Table><Pagination state={pagedDomains} label="domains" /></CardContent></Card>
+    <section><CardHeader><CardTitle info="Earning accurate coverage on these sites improves how AI describes you. If a domain is a rival product, add it as a competitor to track its share of voice.">Websites that influence AI answers</CardTitle></CardHeader>
+      <CardContent><div className="mb-3 flex gap-2"><SearchBox className="w-[32rem]" placeholder="Filter domains or providers…" value={filter} onSearch={setFilter} /><div className="ml-auto"><CsvExportButton filename="ai-influencing-sources.csv" rows={domains} columns={SOURCE_COLUMNS} /></div></div><Table><THead><TR><TH>Domain</TH><TH>Citations</TH><TH>Answers</TH><TH>Providers</TH><TH>Example URLs</TH><TH /></TR></THead>
+        <TBody>{pagedDomains.items.map((d) => <TR key={d.domain}><TD className="font-medium">{d.domain}</TD><TD>{d.citations}</TD><TD>{d.answers}</TD><TD className="text-xs">{d.providers.join(", ")}</TD><TD className="text-xs">{d.sample_urls.map((u) => <div key={u}><a className="text-primary hover:underline truncate block max-w-md" href={u} target="_blank" rel="noreferrer">{u}</a></div>)}</TD><TD className="text-right whitespace-nowrap"><AddCompetitorButton pid={pid} domain={d.domain} competitors={competitors ?? []} /></TD></TR>)}</TBody></Table><Pagination state={pagedDomains} label="domains" /></CardContent></section>
   );
 }
 
@@ -360,7 +309,7 @@ function PromptsTab({ pid, prompts, onAdd }: { pid: string; prompts: Prompt[]; o
   const paged = usePaged(rows);
   if (!prompts.length) return <EmptyState title="No prompts yet"><Button className="mt-2" onClick={onAdd}>Add prompts</Button></EmptyState>;
   return (
-    <><div className="mb-3 flex gap-2"><Input className="max-w-sm" placeholder="Filter prompts…" value={filter} onChange={(e) => setFilter(e.target.value)} /><div className="ml-auto"><CsvExportButton filename="ai-prompts.csv" rows={rows} columns={PROMPT_COLUMNS} /></div></div><Table><THead><TR><TH>Prompt</TH><TH>Intent</TH><TH>Topic</TH><TH>Locale</TH><TH>Samples/run</TH><TH>Active</TH><TH /></TR></THead>
+    <><div className="mb-3 flex gap-2"><SearchBox className="w-[32rem]" placeholder="Filter prompts…" value={filter} onSearch={setFilter} /><div className="ml-auto"><CsvExportButton filename="ai-prompts.csv" rows={rows} columns={PROMPT_COLUMNS} /></div></div><Table><THead><TR><TH>Prompt</TH><TH>Intent</TH><TH>Topic</TH><TH>Locale</TH><TH>Samples/run</TH><TH>Active</TH><TH /></TR></THead>
       <TBody>{paged.items.map((p) => <TR key={p.id}><TD className="max-w-md text-sm">{p.text}</TD><TD><Select value={p.intent} onChange={(e) => upd.mutate({ id: p.id, intent: e.target.value })} className="w-36">{["informational", "commercial", "comparison", "transactional", "navigational"].map((i) => <option key={i}>{i}</option>)}</Select></TD><TD className="text-xs">{p.topic ?? "—"}</TD><TD className="text-xs">{p.language}-{p.country}</TD><TD><Input type="number" min={1} max={10} className="w-16" defaultValue={p.samples_per_run} onBlur={(e) => upd.mutate({ id: p.id, samples_per_run: Number(e.target.value) })} /></TD><TD><input type="checkbox" checked={p.is_active} onChange={(e) => upd.mutate({ id: p.id, is_active: e.target.checked })} /></TD><TD><Button size="sm" variant="ghost" onClick={() => del.mutate(p.id)}>Delete</Button></TD></TR>)}</TBody></Table><Pagination state={paged} label="prompts" /></>
   );
 }
@@ -396,7 +345,7 @@ function RunsTab({ pid }: { pid: string }) {
   if (isLoading) return <Loading />;
   if (!data?.length) return <EmptyState title="No runs yet" />;
   return (
-    <><div className="mb-3 flex gap-2"><Input className="max-w-sm" placeholder="Filter runs or providers…" value={filter} onChange={(e) => setFilter(e.target.value)} /><div className="ml-auto"><CsvExportButton filename="ai-visibility-runs.csv" rows={rows} columns={RUN_COLUMNS} /></div></div><Table><THead><TR><TH>Run</TH><TH>Samples</TH><TH>Prompts</TH><TH>Providers</TH><TH>Brand mention rate</TH><TH>Own domain cited</TH><TH>Competitors</TH></TR></THead>
+    <><div className="mb-3 flex gap-2"><SearchBox className="w-[32rem]" placeholder="Filter runs or providers…" value={filter} onSearch={setFilter} /><div className="ml-auto"><CsvExportButton filename="ai-visibility-runs.csv" rows={rows} columns={RUN_COLUMNS} /></div></div><Table><THead><TR><TH>Run</TH><TH>Samples</TH><TH>Prompts</TH><TH>Providers</TH><TH>Brand mention rate</TH><TH>Own domain cited</TH><TH>Competitors</TH></TR></THead>
       <TBody>{pagedRuns.items.map((r) => <TR key={r.run_id}><TD className="text-xs"><TimeAgo value={r.observed_at} /></TD><TD>{r.samples}</TD><TD>{r.prompts}</TD><TD className="text-xs">{r.providers.join(", ")}</TD><TD className="font-medium">{fmtPct(r.brand_mention_rate, 0)}</TD><TD>{fmtPct(r.own_domain_cited_rate, 0)}</TD><TD className="text-xs">{Object.entries(r.competitors).slice(0, 5).map(([n, v]) => `${n} ${fmtPct(v, 0)}`).join(" · ")}</TD></TR>)}</TBody></Table><Pagination state={pagedRuns} label="runs" /></>
   );
 }

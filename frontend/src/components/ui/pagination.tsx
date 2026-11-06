@@ -39,7 +39,7 @@ export function Pagination({ state, label = "rows", className }: { state: PageSt
   const { page, setPage, size, setSize, total, pages, from, to } = state;
   if (total <= PAGE_SIZES[0]) return null;
   return (
-    <div className={cn("mt-3 flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground", className)}>
+    <div className={cn("sticky bottom-0 z-20 mt-3 flex flex-wrap items-center justify-between gap-3 bg-slate-50 py-2 text-xs text-muted-foreground dark:bg-slate-950", className)}>
       <div className="flex items-center gap-2">
         <label htmlFor={`page-size-${label}`}>Per page</label>
         <Select
@@ -51,7 +51,7 @@ export function Pagination({ state, label = "rows", className }: { state: PageSt
           {PAGE_SIZES.map((n) => <option key={n} value={n}>{n}</option>)}
         </Select>
       </div>
-      <div className="tabular-nums">{from}–{to} of {total} {label}</div>
+      <div className="tabular-nums">{from}–{to} of {total}</div>
       <div className="flex items-center gap-1">
         <button type="button" className="rounded-md border px-2 py-1 disabled:opacity-40 enabled:hover:bg-slate-100 dark:enabled:hover:bg-slate-800"
           onClick={() => setPage(page - 1)} disabled={page <= 1} aria-label="Previous page">

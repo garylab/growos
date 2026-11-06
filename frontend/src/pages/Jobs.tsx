@@ -5,7 +5,8 @@ import { api, type Job } from "@/lib/api";
 import { useJobs } from "@/hooks/useJobs";
 import { JobsTable } from "@/components/JobsPanel";
 import { Button } from "@/components/ui/button";
-import { Input, Select } from "@/components/ui/input";
+import { Select } from "@/components/ui/input";
+import { SearchBox } from "@/components/ui/search-box";
 import { EmptyState, Loading, PageHeader } from "@/components/ui/misc";
 import { Pagination, usePaged } from "@/components/ui/pagination";
 import { CsvExportButton, type CsvColumn } from "@/components/ui/csv-export";
@@ -50,7 +51,6 @@ export function JobsPage() {
     <div>
       <PageHeader title="Jobs" info="Every background job this project has run: crawls, syncs, AI sampling, content writing and plan rebuilds. Running jobs refresh automatically." />
       <div className="mb-4 flex flex-wrap items-center gap-2">
-        <Input className="w-64" placeholder="Search name, trigger or error…" value={q} onChange={(e) => setQ(e.target.value)} />
         <Select className="w-64" value={type} onChange={(e) => setType(e.target.value)}>
           <option value="">All types</option>
           {used.map((t) => <option key={t} value={t} title={tasks?.[t]}>{t}</option>)}
@@ -59,6 +59,7 @@ export function JobsPage() {
           <option value="">Any status</option>
           {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
         </Select>
+        <SearchBox className="w-[32rem]" placeholder="Search name, trigger or error…" value={q} onSearch={setQ} />
         {filtering && <Button size="sm" variant="outline" onClick={() => { setQ(""); setType(""); setStatus(""); }}><X className="h-3 w-3" /> Clear</Button>}
         <span className="text-xs text-muted-foreground">{filtered.length} of {jobs?.length ?? 0}</span>
         <div className="ml-auto"><CsvExportButton filename="jobs.csv" rows={filtered} columns={JOB_COLUMNS} /></div>

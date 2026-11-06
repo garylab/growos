@@ -2,11 +2,13 @@ import * as React from "react";
 import { cn } from "@/lib/utils";
 
 export const Table = ({ className, containerClassName, ...p }: React.HTMLAttributes<HTMLTableElement> & { containerClassName?: string }) => (
-  <div className={cn("w-full overflow-auto bg-white dark:bg-slate-900", containerClassName)}>
-    <table className={cn("w-full caption-bottom text-sm", className)} {...p} />
+  <div className={cn("w-full overflow-auto bg-white dark:bg-slate-900 lg:contents", containerClassName)}>
+    <table className={cn("w-full caption-bottom bg-white text-sm dark:bg-slate-900", className)} {...p} />
   </div>
 );
-export const THead = (p: React.HTMLAttributes<HTMLTableSectionElement>) => <thead className="bg-slate-50 dark:bg-slate-800/60 [&_tr]:border-b" {...p} />;
+export const THead = ({ className, ...p }: React.HTMLAttributes<HTMLTableSectionElement>) => (
+  <thead className={cn("sticky top-0 z-20 bg-slate-50 shadow-[0_1px_0_0_hsl(var(--border))] dark:bg-slate-800 [&_tr]:border-b", className)} {...p} />
+);
 export const TBody = (p: React.HTMLAttributes<HTMLTableSectionElement>) => <tbody className="[&_tr:last-child]:border-0" {...p} />;
 export const TR = ({ className, ...p }: React.HTMLAttributes<HTMLTableRowElement>) => (
   <tr className={cn("border-b transition-colors hover:bg-slate-50/60 dark:hover:bg-slate-800/60", className)} {...p} />

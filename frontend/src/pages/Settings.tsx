@@ -8,6 +8,7 @@ import { useEnqueue } from "@/hooks/useJobs";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Field, Input, Select, Textarea } from "@/components/ui/input";
+import { SearchBox } from "@/components/ui/search-box";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { TimeAgo } from "@/components/ui/time";
 import { fmtInt, fmtNum } from "@/lib/utils";
@@ -72,7 +73,7 @@ export function SettingsPage() {
           </form>
         </CardContent></Card>
         <Card><CardHeader><CardTitle info="The sites you own — crawled, measured and tracked in search. Competitors live on the Competitors page.">Your websites</CardTitle></CardHeader><CardContent className="space-y-3">
-          <div className="flex gap-2"><Input placeholder="Filter websites…" value={domainFilter} onChange={(e) => setDomainFilter(e.target.value)} /><CsvExportButton filename="websites.csv" rows={primaryDomains} columns={DOMAIN_COLUMNS} /></div>
+          <div className="flex gap-2"><SearchBox className="w-[32rem]" placeholder="Filter websites…" value={domainFilter} onSearch={setDomainFilter} /><CsvExportButton filename="websites.csv" rows={primaryDomains} columns={DOMAIN_COLUMNS} /></div>
           <Table><THead><TR><TH>Host</TH><TH>Search Console property</TH><TH /></TR></THead><TBody>{primaryDomains.map((d) => <TR key={d.id}><TD>{d.hostname}</TD><TD className="text-xs">{d.gsc_property ?? <span className="text-muted-foreground">set under SEO → Search performance</span>}</TD><TD className="text-right"><Button size="sm" variant="ghost" onClick={() => delDomain.mutate(d.id)}>Remove</Button></TD></TR>)}</TBody></Table>
           <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); addDomain.mutate(); }}><Input placeholder="https://www.example.com" value={url} onChange={(e) => setUrl(e.target.value)} /><Button type="submit" disabled={addDomain.isPending}>Add website</Button></form>
           <ErrorBox error={addDomain.error} />
@@ -93,7 +94,7 @@ export function SettingsPage() {
           </CardContent></Card>
         )}
         <Card><CardHeader><CardTitle info="The worker enqueues these jobs automatically. Recommended: Search Console daily, crawl weekly, AI visibility weekly, mentions daily.">Recurring schedules</CardTitle></CardHeader><CardContent className="space-y-3">
-          <div className="flex gap-2"><Input placeholder="Filter schedules…" value={scheduleFilter} onChange={(e) => setScheduleFilter(e.target.value)} /><CsvExportButton filename="recurring-schedules.csv" rows={filteredSchedules} columns={SCHEDULE_COLUMNS} /></div>
+          <div className="flex gap-2"><SearchBox className="w-[32rem]" placeholder="Filter schedules…" value={scheduleFilter} onSearch={setScheduleFilter} /><CsvExportButton filename="recurring-schedules.csv" rows={filteredSchedules} columns={SCHEDULE_COLUMNS} /></div>
           <Table><THead><TR><TH>Task</TH><TH>Every</TH><TH>Next run</TH><TH>Last</TH><TH /></TR></THead><TBody>{pagedSchedules.items.map((s) => <TR key={s.id}><TD className="text-xs">{s.task_type}{s.params.domain_id ? ` (${(domains ?? []).find((d) => d.id === s.params.domain_id)?.hostname ?? "domain"})` : ""}</TD><TD>{s.interval_minutes >= 1440 ? `${s.interval_minutes / 1440} d` : `${s.interval_minutes} min`}</TD><TD className="text-xs"><TimeAgo value={s.next_run_at} fallback="not scheduled" /></TD><TD className="text-xs"><TimeAgo value={s.last_enqueued_at} fallback="never" /></TD><TD className="text-right"><Button size="sm" variant="ghost" onClick={() => delSched.mutate(s.id)}>Remove</Button></TD></TR>)}</TBody></Table>
           <Pagination state={pagedSchedules} label="schedules" />
           <form className="grid grid-cols-3 gap-2 items-end" onSubmit={(e) => { e.preventDefault(); addSched.mutate(); }}>
@@ -164,7 +165,7 @@ function CandidateTable({ keywords, onPromote, onDelete, busy }:
   ];
   return (
     <>
-      <div className="mb-3 flex gap-2"><Input className="max-w-sm" placeholder="Filter candidates…" value={filter} onChange={(e) => setFilter(e.target.value)} /><div className="ml-auto"><CsvExportButton filename="keyword-candidates.csv" rows={rows} columns={columns} /></div></div>
+      <div className="mb-3 flex gap-2"><SearchBox className="w-[32rem]" placeholder="Filter candidates…" value={filter} onSearch={setFilter} /><div className="ml-auto"><CsvExportButton filename="keyword-candidates.csv" rows={rows} columns={columns} /></div></div>
       <Table>
         <THead><TR><TH>Keyword</TH><TH>Found via</TH><TH>From seed</TH><TH /></TR></THead>
         <TBody>{paged.items.map((k) => (
@@ -202,7 +203,7 @@ function KeywordTable({ pid, keywords, onDelete }: { pid: string; keywords: Keyw
       {data?.available
         ? <p className="text-xs text-muted-foreground">{data.provider} · {data.observed_on} · {fmtInt(data.totals!.total_volume)} searches/mo across {data.totals!.keywords} priced keyword(s){data.totals!.unpriced > 0 && ` · ${data.totals!.unpriced} not priced yet`}</p>
         : <p className="text-xs text-muted-foreground">{data?.connected_provider ? "Click “Refresh keyword data” to fetch volume and difficulty." : "Connect a provider under Integrations → Keyword & SERP data to see volume, difficulty and CPC."}</p>}
-      <div className="flex gap-2"><Input className="max-w-sm" placeholder="Filter target keywords…" value={filter} onChange={(e) => setFilter(e.target.value)} /><div className="ml-auto"><CsvExportButton filename="target-keywords.csv" rows={rows} columns={columns} /></div></div>
+      <div className="flex gap-2"><SearchBox className="w-[32rem]" placeholder="Filter target keywords…" value={filter} onSearch={setFilter} /><div className="ml-auto"><CsvExportButton filename="target-keywords.csv" rows={rows} columns={columns} /></div></div>
       <Table>
         <THead><TR><TH>Keyword</TH><TH className="text-right">Volume</TH><TH className="text-right">Difficulty</TH><TH className="text-right">CPC</TH><TH>Intent</TH><TH className="text-right">Priority</TH><TH /></TR></THead>
         <TBody>{paged.items.map((k) => (

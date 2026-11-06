@@ -328,10 +328,10 @@ def backlinks(domain: Domain = Depends(get_domain), limit: int = Query(500, le=2
 def backlink_links(domain: Domain = Depends(get_domain), q: str | None = None, dofollow: bool | None = None,
                    referring_domain: str | None = None, limit: int = Query(500, le=2000),
                    db: Session = Depends(get_db)):
-    """Individual links, folded by referring domain.
+    """Individual links, plus the same links folded by referring domain.
 
-    Always returns the per-domain groups. `links` is filled only when a single `referring_domain` is asked for, so
-    expanding one row costs one small query instead of shipping every link up front.
+    `links` is the flat list the Backlinks view renders; `groups` is the per-domain roll-up. Both honour the same
+    `q`/`dofollow` filters, and `referring_domain` narrows the flat list to a single linking site.
     """
     where = [Backlink.domain_id == domain.id]
     if q:
@@ -358,15 +358,18 @@ def backlink_links(domain: Domain = Depends(get_domain), q: str | None = None, d
     for host, anchor, _n in anchor_counts:
         top_anchor.setdefault(host, anchor)
 
-    links = []
+    # The flat list of individual links, filtered the same way as the groups. Returned for the whole result set,
+    # narrowed to one site only when `referring_domain` is given.
+    link_where = list(where)
     if referring_domain:
-        rows = db.scalars(select(Backlink).where(*where, Backlink.referring_domain == referring_domain)
-                          .order_by(Backlink.domain_rating.desc().nullslast(), Backlink.url_from)
-                          .limit(limit)).all()
-        links = [{"url_from": b.url_from, "url_to": b.url_to, "referring_domain": b.referring_domain,
-                  "anchor": b.anchor, "page_title": b.page_title, "dofollow": b.dofollow,
-                  "domain_rating": b.domain_rating, "first_seen": b.first_seen, "last_seen": b.last_seen}
-                 for b in rows]
+        link_where.append(Backlink.referring_domain == referring_domain)
+    rows = db.scalars(select(Backlink).where(*link_where)
+                      .order_by(Backlink.domain_rating.desc().nullslast(), Backlink.referring_domain, Backlink.url_from)
+                      .limit(limit)).all()
+    links = [{"url_from": b.url_from, "url_to": b.url_to, "referring_domain": b.referring_domain,
+              "anchor": b.anchor, "page_title": b.page_title, "dofollow": b.dofollow,
+              "domain_rating": b.domain_rating, "first_seen": b.first_seen, "last_seen": b.last_seen}
+             for b in rows]
 
     total, follow = db.execute(select(func.count(), func.count().filter(Backlink.dofollow.is_(True)))
                                .where(Backlink.domain_id == domain.id)).one()
@@ -514,36 +517,56 @@ def rankings(domain: Domain = Depends(get_domain), provider_key: str | None = No
                 "reason": "No rank checks yet. Connect a provider that checks live SERPs (DataForSEO or SerpApi), "
                           "then run “Check rankings”."}
     chosen = provider_key if provider_key in providers else providers[0]
-    scoped = (RankObservation.domain_id == domain.id, RankObservation.provider_key == chosen)
-    days = db.scalars(select(RankObservation.observed_on).where(*scoped)
-                      .group_by(RankObservation.observed_on)
-                      .order_by(desc(RankObservation.observed_on)).limit(2)).all()
-    before = {k: p for k, p in db.execute(
-        select(RankObservation.keyword_id, RankObservation.position)
-        .where(*scoped, RankObservation.observed_on == days[1])).all()} if len(days) > 1 else {}
-    rows = db.execute(select(Keyword, RankObservation)
-                      .join(RankObservation, RankObservation.keyword_id == Keyword.id)
-                      .where(*scoped, RankObservation.observed_on == days[0])
-                      .order_by(RankObservation.position.nullslast())).all()
-    ranked = [r for _k, r in rows if r.position]
+
+    def engine_rows(prov):
+        """Latest-day keyword rows for one engine, plus that engine's previous-day positions for movement."""
+        scoped = (RankObservation.domain_id == domain.id, RankObservation.provider_key == prov)
+        days = db.scalars(select(RankObservation.observed_on).where(*scoped)
+                          .group_by(RankObservation.observed_on)
+                          .order_by(desc(RankObservation.observed_on)).limit(2)).all()
+        if not days:
+            return [], {}, []
+        before = {k: p for k, p in db.execute(
+            select(RankObservation.keyword_id, RankObservation.position)
+            .where(*scoped, RankObservation.observed_on == days[1])).all()} if len(days) > 1 else {}
+        rows = db.execute(select(Keyword, RankObservation)
+                          .join(RankObservation, RankObservation.keyword_id == Keyword.id)
+                          .where(*scoped, RankObservation.observed_on == days[0])
+                          .order_by(RankObservation.position.nullslast())).all()
+        return days, before, rows
+
+    def serialize(prov, before, rows):
+        return [{"id": str(k.id), "engine": prov, "text": k.text, "position": r.position, "url": r.url,
+                 "serp_features": r.serp_features,
+                 # A keyword that was absent and now ranks has no numeric delta, so it is flagged instead.
+                 "change": (before[k.id] - r.position) if (k.id in before and before[k.id] and r.position) else None,
+                 "is_new": k.id in before and not before[k.id] and bool(r.position),
+                 "lost": k.id in before and bool(before[k.id]) and not r.position}
+                for k, r in rows]
+
+    # The table lists every engine's keywords together (each row tagged with its engine), while the summary
+    # metrics and the history chart stay scoped to the chosen engine — positions from different engines are
+    # different result pages, so pooling their counts or averaging their positions would be meaningless.
+    keywords = []
+    for prov in providers:
+        _d, before, rows = engine_rows(prov)
+        keywords.extend(serialize(prov, before, rows))
+
+    days, _before, chosen_rows = engine_rows(chosen)
+    ranked = [r for _k, r in chosen_rows if r.position]
+    chosen_scoped = (RankObservation.domain_id == domain.id, RankObservation.provider_key == chosen)
     history = db.execute(
         select(RankObservation.observed_on, func.count().filter(RankObservation.position.is_not(None)),
                func.avg(RankObservation.position))
-        .where(*scoped)
+        .where(*chosen_scoped)
         .group_by(RankObservation.observed_on).order_by(RankObservation.observed_on)).all()
     return {
         "available": True, "observed_on": days[0].isoformat(), "provider": chosen, "providers": providers,
         "previous_observed_on": days[1].isoformat() if len(days) > 1 else None,
-        "totals": {"checked": len(rows), "ranking": len(ranked), "absent": len(rows) - len(ranked),
+        "totals": {"checked": len(chosen_rows), "ranking": len(ranked), "absent": len(chosen_rows) - len(ranked),
                    "top_10": sum(1 for r in ranked if r.position <= 10),
                    "avg_position": (sum(r.position for r in ranked) / len(ranked)) if ranked else None},
         "history": [{"date": d.isoformat(), "ranking": int(n or 0), "avg_position": float(a) if a else None}
                     for d, n, a in history],
-        "keywords": [{"id": str(k.id), "text": k.text, "position": r.position, "url": r.url,
-                      "serp_features": r.serp_features,
-                      # A keyword that was absent and now ranks has no numeric delta, so it is flagged instead.
-                      "change": (before[k.id] - r.position) if (k.id in before and before[k.id] and r.position) else None,
-                      "is_new": k.id in before and not before[k.id] and bool(r.position),
-                      "lost": k.id in before and bool(before[k.id]) and not r.position}
-                     for k, r in rows],
+        "keywords": keywords,
     }

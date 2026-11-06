@@ -22,6 +22,7 @@ export interface PlanItem {
   assignee_id: string | null; assignee: { id: string; email: string; name: string | null } | null; due_date: string | null;
   confidence: number; score_breakdown: Record<string, any>; origin: string; target_urls: string[]; target_keywords: string[];
   history: { at: string; event: string; actor?: string; from?: number; to?: number }[];
+  affects: { key: string; label: string }[];
 }
 interface Plan { summary: { open_fixes: number; setup_open: number; business_open: number; fix_open: number; routines_due: number; routines_total: number; done_total: number; last_generated_at: string | null; total: number }; setup: PlanItem[]; business: PlanItem[]; fix: PlanItem[]; routine: PlanItem[]; members: { id: string; email: string; name: string | null }[] }
 
@@ -54,7 +55,7 @@ function CategoryIcon({ category }: { category: string }) {
 /** In-app destinations referenced in "how to do it" steps, e.g. "SEO Performance → Run crawl & audit".
  *  Tabs are URL-addressable, so each reference can point at the exact tab. */
 const APP_PAGES: { label: string; route: (step: string) => string }[] = [
-  { label: "GEO AI Visibility", route: (s) => (/prompt/i.test(s) ? "/ai-visibility/prompts" : "/ai-visibility/visibility") },
+  { label: "GEO AI Visibility", route: (s) => (/prompt/i.test(s) ? "/geo/prompts" : "/geo/visibility") },
   { label: "Growth Opportunities", route: () => "/opportunities/opportunities" },
   { label: "Actions & Results", route: () => "/actions" },
   { label: "Brand Monitoring", route: () => "/brand/mentions" },
@@ -240,6 +241,11 @@ function Item({ item, pid, members, routine }: { item: PlanItem; pid: string; me
               {item.assignee && <Badge variant="info" title={item.assignee.email}>{item.assignee.name || item.assignee.email}</Badge>}
               {item.origin === "ai" && <Badge variant="info" title="Added by the AI analyst from your data">AI analyst</Badge>}
               {tracked && <Badge variant="success" title="A tracked result exists for this item">measuring</Badge>}
+              {item.affects?.length > 0 && (
+                <span className="flex items-center gap-1 text-xs text-muted-foreground" title="The brand scores this work moves on the Overview">
+                  <Target className="h-3 w-3 shrink-0" /> Improves {item.affects.map((a) => a.label).join(", ")}
+                </span>
+              )}
             </div>
             {open && (
               <div className="mt-3 space-y-3 text-sm">
@@ -448,7 +454,7 @@ function Suggestions({ s }: { s: Record<string, any> }) {
       </div>))}</div>, "topics"));
   }
   if (Array.isArray(s.queries) && s.queries.length) {
-    blocks.push(panel("Searches to act on", <div className="overflow-auto"><table className="w-full text-xs"><thead className="text-muted-foreground"><tr><th className="text-left py-1">Search</th><th className="text-left">Page</th><th className="text-right">Impr.</th><th className="text-right">Pos.</th><th className="text-left pl-3">New title idea</th></tr></thead>
+    blocks.push(panel("Searches to act on", <div className="overflow-auto"><table className="w-full text-xs"><thead className="sticky top-0 z-20 bg-white text-muted-foreground shadow-[0_1px_0_0_hsl(var(--border))] dark:bg-slate-900"><tr><th className="text-left py-1">Search</th><th className="text-left">Page</th><th className="text-right">Impr.</th><th className="text-right">Pos.</th><th className="text-left pl-3">New title idea</th></tr></thead>
       <tbody>{s.queries.map((q: any, i: number) => <tr key={i} className="border-t"><td className="py-1 pr-2">{q.query}</td><td className="max-w-[14rem] truncate"><a className="text-primary hover:underline" href={q.page} target="_blank" rel="noreferrer">{q.page?.replace(/^https?:\/\/[^/]+/, "")}</a></td><td className="text-right tabular-nums">{q.impressions}</td><td className="text-right tabular-nums">{q.position}</td><td className="pl-3 text-muted-foreground">{q.title_placeholder ?? "—"}</td></tr>)}</tbody></table></div>, "queries"));
   }
   if (Array.isArray(s.prompts) && s.prompts.length) {

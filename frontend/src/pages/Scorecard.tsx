@@ -7,7 +7,7 @@ import { EmptyState, ErrorBox, InfoHint, Loading } from "@/components/ui/misc";
 import { RevenueSummary, type Revenue } from "@/components/RevenueModel";
 import { cn, fmtPct } from "@/lib/utils";
 import { fmtDay } from "@/lib/time";
-import { ArrowRight, Minus, TrendingDown, TrendingUp } from "lucide-react";
+import { Minus, TrendingDown, TrendingUp } from "lucide-react";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 interface Component { key: string; label: string; weight: number; weight_used: number; score: number | null; raw: any; unit: string; source: string; formula: string; note: string; available: boolean }
@@ -166,14 +166,6 @@ function IndexHeadline({ index: i, history, revenue }: { index: Index; history: 
           </div>
           <Spark series={history} keyName={i.key} color={LEVER_COLOR[i.key] ?? "#64748b"} />
         </div>
-        {i.levers.length > 0 && (
-          <div className="mt-3 border-t pt-2">
-            <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1 flex items-center gap-1">What raises this</div>
-            <ul className="space-y-0.5">{i.levers.map((l) => (
-              <li key={l.id}><Link to="/plan" className="flex items-center gap-1 text-xs text-primary hover:underline" title={l.title}><ArrowRight className="h-3 w-3 shrink-0" /><span className="line-clamp-1">{l.title}</span></Link></li>
-            ))}</ul>
-          </div>
-        )}
       </CardContent>
     </Card>
   );

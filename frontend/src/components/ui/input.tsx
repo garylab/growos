@@ -54,7 +54,7 @@ const SELECT_CHEVRON = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/
 export const Select = React.forwardRef<HTMLSelectElement, React.SelectHTMLAttributes<HTMLSelectElement>>(({ className, style, ...props }, ref) => (
   <select
     ref={ref}
-    className={cn("flex h-9 w-full appearance-none rounded-md border border-input bg-white bg-no-repeat py-1 pl-3 pr-10 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:bg-slate-900", className)}
+    className={cn("flex h-9 w-full appearance-none rounded-md border border-input bg-white bg-no-repeat py-1 pl-3 pr-8 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:bg-slate-900", className)}
     style={{ backgroundImage: SELECT_CHEVRON, backgroundPosition: "right 0.375rem center", backgroundSize: "1rem", ...style }}
     {...props}
   />

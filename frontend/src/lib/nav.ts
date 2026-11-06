@@ -24,7 +24,7 @@ const seo: NavTab[] = [
   { id: "page-performance", label: "Page performance" },
   { id: "backlinks", label: "Backlinks" },
   { id: "rankings", label: "Rankings" },
-  { id: "history", label: "History & changes" },
+  { id: "history", label: "Crawl history" },
 ];
 const geo: NavTab[] = [
   { id: "visibility", label: "Visibility" },
@@ -32,7 +32,7 @@ const geo: NavTab[] = [
   { id: "answers", label: "Answers" },
   { id: "influencing-sources", label: "Influencing sources" },
   { id: "prompts", label: "Prompts" },
-  { id: "runs", label: "Runs & history" },
+  { id: "runs", label: "Run History" },
 ];
 const brand: NavTab[] = [
   { id: "mentions", label: "Mentions" },
@@ -48,11 +48,11 @@ const competitors: NavTab[] = [
 
 /** The whole left-hand menu. Sections with `tabs` render as collapsible sub-menus; there is no second grouping level. */
 export const NAV: NavItem[] = [
-  { to: "/overview", label: "Overview", icon: LayoutDashboard },
+  { to: "/", label: "Overview", icon: LayoutDashboard, end: true },
   { to: "/plan", label: "Growth Plan", icon: ClipboardCheck },
   { to: "/actions", label: "Results", icon: ListChecks },
   { to: "/seo", label: "SEO Performance", icon: BarChart3, tabs: seo, dividerBefore: true },
-  { to: "/ai-visibility", label: "GEO AI Visibility", icon: Bot, tabs: geo },
+  { to: "/geo", label: "GEO AI Visibility", icon: Bot, tabs: geo },
   { to: "/brand", label: "Brand Monitoring", icon: Megaphone, tabs: brand },
   { to: "/competitors", label: "Competitors", icon: Users, tabs: competitors },
   { to: "/jobs", label: "Jobs", icon: ListTodo, dividerBefore: true },
