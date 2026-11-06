@@ -66,7 +66,7 @@ def _fmt_delta(now: int, prev: int) -> str:
 
 
 def digest_text(project: Project, d: dict[str, Any]) -> str:
-    lines = [f"Weekly growth summary for {project.name}", ""]
+    lines = [f"Weekly growth summary for {getattr(project, 'brand_name', project.name)}", ""]
     if d["search"]:
         s = d["search"]
         lines += [f"Search clicks: {_fmt_delta(s['clicks'], s['clicks_prev'])}",

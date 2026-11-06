@@ -13,7 +13,7 @@ from app.tasks.registry import task
 def ai_analysis(ctx: TaskContext) -> dict[str, Any]:
     project = ctx.db.get(Project, ctx.project_id)
     if project is None:
-        raise ValueError("Project not found")
+        raise ValueError("Brand not found")
     check_budget(ctx.db, project)
     result = run_analysis(ctx.db, project, focus=ctx.params.get("focus"), job_id=ctx.job.id, on_progress=ctx.progress)
     ctx.save_artifact(result["provider"], "ai_analysis_transcript", result["transcript"])

@@ -136,7 +136,7 @@ function VisibilityTab({ pid }: { pid: string }) {
   const s = data.summary, p = data.previous;
   const comps = Object.entries(s.competitors);
   const competitorSeries = [
-    { key: "brand", label: project?.name ?? "Your brand", color: "#7c3aed", width: 3 },
+    { key: "brand", label: project?.brand_name ?? "Your brand", color: "#7c3aed", width: 3 },
     ...comps.map(([name], index) => ({
       key: `competitor_${index}`,
       label: name,

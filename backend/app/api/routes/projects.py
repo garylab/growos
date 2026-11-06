@@ -85,7 +85,7 @@ def add_domain(body: DomainIn, project: Project = Depends(get_project), db: Sess
     hostname = parts.hostname or ""
     base_url = f"{parts.scheme}://{parts.netloc}{parts.path if parts.path and parts.path != '/' else ''}".rstrip("/") + "/"
     if db.scalar(select(Domain).where(Domain.project_id == project.id, Domain.hostname == hostname)):
-        raise HTTPException(409, "Domain already exists in this project")
+        raise HTTPException(409, "Domain already exists for this brand")
     for wu in body.watch_urls:
         try:
             validate_url(wu)

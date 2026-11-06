@@ -246,7 +246,7 @@ def add_member(body: MemberIn, project: Project = Depends(get_project), db: Sess
                principal: Principal = Depends(get_principal)):
     from app.api.deps import member_role
     if not (principal.is_admin or member_role(db, project.id, principal.id) == "owner"):
-        raise HTTPException(403, "Only an administrator or the project owner can add members")
+        raise HTTPException(403, "Only an administrator or the brand owner can add members")
     if body.role not in MEMBER_ROLES:
         raise HTTPException(400, f"role must be one of {MEMBER_ROLES}")
     user = db.get(User, body.user_id)
@@ -280,7 +280,7 @@ def set_member_role(user_id: uuid.UUID, body: RoleIn, project: Project = Depends
         raise HTTPException(400, "You cannot change your own role")
     is_owner = bool(principal.id) and member_role(db, project.id, principal.id) == "owner"
     if not (principal.is_admin or is_owner):
-        raise HTTPException(403, "Only an administrator or the project owner can change roles")
+        raise HTTPException(403, "Only an administrator or the brand owner can change roles")
     member = db.scalar(select(ProjectMember).where(ProjectMember.project_id == project.id,
                                                    ProjectMember.user_id == user.id))
     if member is None:
@@ -301,6 +301,6 @@ def remove_member(user_id: uuid.UUID, project: Project = Depends(get_project), d
                   principal: Principal = Depends(get_principal)):
     from app.api.deps import member_role
     if not (principal.is_admin or member_role(db, project.id, principal.id) == "owner"):
-        raise HTTPException(403, "Only an administrator or the project owner can remove members")
+        raise HTTPException(403, "Only an administrator or the brand owner can remove members")
     db.execute(delete(ProjectMember).where(ProjectMember.project_id == project.id, ProjectMember.user_id == user_id))
     db.commit()

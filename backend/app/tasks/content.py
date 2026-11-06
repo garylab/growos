@@ -14,7 +14,7 @@ from app.tasks.registry import task
 def generate_content(ctx: TaskContext) -> dict[str, Any]:
     project = ctx.db.get(Project, ctx.project_id)
     if project is None:
-        raise ValueError("Project not found")
+        raise ValueError("Brand not found")
     check_budget(ctx.db, project)
     p = ctx.params
     plan_item = ctx.db.get(PlanItem, uuid.UUID(p["plan_item_id"])) if p.get("plan_item_id") else None

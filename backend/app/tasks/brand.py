@@ -21,7 +21,7 @@ CONNECTIONLESS_SOURCES = ("hackernews", "bluesky")
 def monitor_brand_mentions(ctx: TaskContext) -> dict[str, Any]:
     project = ctx.db.get(Project, ctx.project_id)
     if project is None:
-        raise ValueError("Project not found")
+        raise ValueError("Brand not found")
     competitors = ctx.db.scalars(select(Competitor).where(Competitor.project_id == project.id)).all()
     comp_lookup = {c.name: c.id for c in competitors}
     queries = [project.brand_name, *[a for a in (project.brand_aliases or []) if len(a) > 2]] + [c.name for c in competitors]

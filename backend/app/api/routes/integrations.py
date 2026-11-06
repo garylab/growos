@@ -97,7 +97,7 @@ def update_connection(connection_id: uuid.UUID, body: ConnectionUpdate, db: Sess
         conn.is_enabled = body.is_enabled
     if "project_id" in body.model_fields_set:
         if body.project_id is not None and db.get(Project, body.project_id) is None:
-            raise HTTPException(404, "Project not found")
+            raise HTTPException(404, "Brand not found")
         conn.project_id = body.project_id
     if body.credentials:
         cls = get_adapter_class(conn.provider_key)

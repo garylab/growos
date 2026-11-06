@@ -12,6 +12,6 @@ from app.tasks.registry import task
 def snapshot_scorecard(ctx: TaskContext) -> dict[str, Any]:
     project = ctx.db.get(Project, ctx.project_id)
     if project is None:
-        raise ValueError("Project not found")
+        raise ValueError("Brand not found")
     card = build_scorecard(ctx.db, project)  # build_scorecard records the daily snapshot as a side effect
     return {"overall": card["overall"]["score"], "indices": {i["key"]: i["score"] for i in card["indices"]}}

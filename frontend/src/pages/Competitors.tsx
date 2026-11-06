@@ -120,7 +120,7 @@ function CompetitorTable({ pid, competitors, domains, onEdit }: { pid: string; c
       </Table>
       <Pagination state={paged} label="competitors" />
       <ErrorBox error={del.error} />
-      {vis?.summary.samples ? <p className="mt-2 text-xs text-muted-foreground">AI mentions: share of {vis.summary.samples} sampled answers in the latest run. {project?.name ?? "Your brand"}: {fmtPct(vis.summary.brand_mention_rate, 0)}.</p> : null}
+      {vis?.summary.samples ? <p className="mt-2 text-xs text-muted-foreground">AI mentions: share of {vis.summary.samples} sampled answers in the latest run. {project?.brand_name ?? "Your brand"}: {fmtPct(vis.summary.brand_mention_rate, 0)}.</p> : null}
     </>
   );
 }

@@ -42,7 +42,7 @@ def check_budget(db: Session, project: Project) -> None:
     used = monthly_tokens(db, project.id)
     if used >= budget:
         raise BudgetExceeded(
-            f"This project has used {used:,} of its {budget:,} monthly AI token budget. Raise it under Settings "
+            f"This brand has used {used:,} of its {budget:,} monthly AI token budget. Raise it under Settings "
             "or wait for next month. (Set the budget to 0 for unlimited.)")
 
 
@@ -72,5 +72,4 @@ def usage_summary(db: Session, project_id: uuid.UUID, project: Project, months: 
         "by_operation": [{"operation": o, "tokens": int(t)} for o, t in by_op][:15],
         "monthly_tokens": [{"month": m.date().isoformat(), "tokens": int(t)} for m, t in monthly[-months:]],
     }
-
 

@@ -90,7 +90,7 @@ def _host(value: str) -> str:
     return ((urlsplit(v).hostname or "") if "://" in v else v.split("/")[0]).removeprefix("www.")[:255]
 
 
-@task("sync_keyword_metrics", "Fetch search volume, difficulty and CPC for the project's target keywords")
+@task("sync_keyword_metrics", "Fetch search volume, difficulty and CPC for the brand’s target keywords")
 def sync_keyword_metrics(ctx: TaskContext) -> dict[str, Any]:
     project_id = ctx.project_id
     provider, adapter, conn = _provider(ctx, project_id, "keyword_metrics")
@@ -168,7 +168,7 @@ def sync_ranked_keywords(ctx: TaskContext) -> dict[str, Any]:
             "failures": failures or None, "observed_on": today.isoformat()}
 
 
-@task("sync_rankings", "Check live SERP positions for the project's target keywords")
+@task("sync_rankings", "Check live SERP positions for the brand’s target keywords")
 def sync_rankings(ctx: TaskContext) -> dict[str, Any]:
     """Check each tracked keyword on every connected search engine.
 
@@ -247,7 +247,7 @@ def discover_keywords(ctx: TaskContext) -> dict[str, Any]:
     provider, adapter, conn = _provider(ctx, project_id, "keyword_discovery")
     project = ctx.db.get(Project, project_id)
     if project is None:
-        raise ValueError("Project not found")
+        raise ValueError("Brand not found")
 
     seeds = [clean_keyword(s) for s in (ctx.params.get("seeds") or [])]
     if not any(seeds):

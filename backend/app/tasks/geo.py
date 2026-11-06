@@ -37,7 +37,7 @@ def can_sample(conn: Any) -> bool:
 def run_ai_visibility(ctx: TaskContext) -> dict[str, Any]:
     project = ctx.db.get(Project, ctx.project_id)
     if project is None:
-        raise ValueError("Project not found")
+        raise ValueError("Brand not found")
     prompt_ids = [uuid.UUID(p) for p in ctx.params.get("prompt_ids", [])]
     stmt = select(PromptDefinition).where(PromptDefinition.project_id == project.id, PromptDefinition.is_active.is_(True))
     if prompt_ids:

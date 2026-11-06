@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
@@ -96,7 +96,11 @@ def update_schedule(schedule_id: uuid.UUID, body: ScheduleIn, project: Project =
     s = db.get(Schedule, schedule_id)
     if s is None or s.project_id != project.id:
         raise HTTPException(404, "Schedule not found")
+    cadence_changed = s.interval_minutes != body.interval_minutes
+    was_enabled = s.is_enabled
     s.task_type, s.params, s.interval_minutes, s.label, s.is_enabled = body.task_type, body.params, body.interval_minutes, body.label, body.is_enabled
+    if body.is_enabled and (not was_enabled or cadence_changed):
+        s.next_run_at = datetime.now(UTC) + timedelta(minutes=body.interval_minutes)
     db.commit()
     db.refresh(s)
     return s

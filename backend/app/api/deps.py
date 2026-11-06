@@ -80,10 +80,10 @@ def get_project(project_id: uuid.UUID, db: Session = Depends(get_db),
                 principal: Principal = Depends(get_principal)) -> Project:
     project = db.get(Project, project_id)
     if project is None:
-        raise HTTPException(404, "Project not found")
+        raise HTTPException(404, "Brand not found")
     if principal.is_admin or (principal.id and member_role(db, project.id, principal.id)):
         return project
-    raise HTTPException(403, "You are not a member of this project")
+    raise HTTPException(403, "You are not a member of this brand")
 
 
 def get_editable_project(project_id: uuid.UUID, db: Session = Depends(get_db),
@@ -93,7 +93,7 @@ def get_editable_project(project_id: uuid.UUID, db: Session = Depends(get_db),
     if not principal.is_admin:
         role = member_role(db, project.id, principal.id) if principal.id else None
         if role == "viewer":
-            raise HTTPException(403, "Your role on this project is read-only")
+            raise HTTPException(403, "Your role for this brand is read-only")
     return project
 
 

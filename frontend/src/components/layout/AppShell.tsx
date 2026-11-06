@@ -101,8 +101,8 @@ export function AppShell() {
         </div>
         <div className="px-3 py-3 border-b">
           <Select className="w-full" value={projectId ?? ""} onChange={(e) => { if (e.target.value === "__new") navigate("/setup"); else setProjectId(e.target.value); }}>
-            {projects?.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-            <option value="__new">+ New project…</option>
+            {projects?.map((p) => <option key={p.id} value={p.id}>{p.brand_name || p.name}</option>)}
+            <option value="__new">+ New brand…</option>
           </Select>
         </div>
         <nav className="flex-1 overflow-y-auto px-2 py-3 space-y-0.5">

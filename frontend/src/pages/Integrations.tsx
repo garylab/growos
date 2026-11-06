@@ -322,8 +322,8 @@ function ConnectionForm({ provider, conn, pid, onDone }: { provider: ProviderMet
   return (
     <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); save.mutate(); }}>
       <Field label="Display name"><Input value={name} onChange={(e) => setName(e.target.value)} /></Field>
-      <Field label="Scope" help="Project-scoped connections override global ones. Switching an existing connection moves it — credentials and config come along.">
-        <Select value={scope} onChange={(e) => setScope(e.target.value as "project" | "global")}><option value="project">This project</option><option value="global">All projects</option></Select>
+      <Field label="Scope" help="Brand-scoped connections override global ones. Switching an existing connection moves it — credentials and config come along.">
+        <Select value={scope} onChange={(e) => setScope(e.target.value as "project" | "global")}><option value="project">This brand</option><option value="global">All brands</option></Select>
       </Field>
       {provider.credential_fields.map((f) => {
         // A credential the deployment supplies from the environment is not something to demand here: drop the

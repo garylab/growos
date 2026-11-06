@@ -35,7 +35,7 @@ class ApifyLinkedInPostsAdapter(ProviderAdapter):
     vendor: ClassVar[str] = "Apify"
     vendor_url: ClassVar[str] = "https://apify.com"
     display_name: ClassVar[str] = "LinkedIn post search"
-    description: ClassVar[str] = ("Search public LinkedIn posts for the project brand and competitors using "
+    description: ClassVar[str] = ("Search public LinkedIn posts for the brand and its competitors using "
                                   "HarvestAPI's cookie-free Apify Actor. Paid per returned post; comments and "
                                   "reactions are disabled by default.")
     docs_url: ClassVar[str] = "https://apify.com/harvestapi/linkedin-post-search"

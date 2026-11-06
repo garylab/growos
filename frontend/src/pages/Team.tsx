@@ -18,17 +18,17 @@ import { CsvExportButton, type CsvColumn } from "@/components/ui/csv-export";
 interface AccountRow extends User { member?: Member }
 const USER_COLUMNS: CsvColumn<AccountRow>[] = [
   { key: "name", label: "Name", value: (r) => r.name }, { key: "email", label: "Email", value: (r) => r.email },
-  { key: "role", label: "Role", value: (r) => r.member?.role ?? "not on this project" }, { key: "active", label: "Active", value: (r) => r.is_active },
+  { key: "role", label: "Role", value: (r) => r.member?.role ?? "not on this brand" }, { key: "active", label: "Active", value: (r) => r.is_active },
   { key: "last_login", label: "Last signed in", value: (r) => r.last_login_at },
 ];
 
 /** Project access is assigned separately for the project currently being viewed. */
 const ROLES = [
-  { value: "owner", label: "Owner — can manage this project's members" },
+  { value: "owner", label: "Owner — can manage this brand’s members" },
   { value: "editor", label: "Editor — can run and change things" },
   { value: "viewer", label: "Viewer — read only" },
 ];
-const ROLE_HELP = "This role applies only to the current project. Add the person separately from each project's Team page.";
+const ROLE_HELP = "This role applies only to the current brand. Add the person separately from each brand’s Team page.";
 
 export function TeamPage() {
   const pid = useProjectId();
@@ -80,7 +80,7 @@ export function TeamPage() {
           </section>
       </div>
       <Dialog open={adding} onOpenChange={setAdding}>
-        <DialogContent title="Add a person" description="Creates an account and adds it only to this project.">
+        <DialogContent title="Add a person" description="Creates an account and adds it only to this brand.">
           <NewUserForm currentProjectId={pid} onDone={() => { setAdding(false); qc.invalidateQueries({ queryKey: ["users"] }); qc.invalidateQueries({ queryKey: ["members", pid] }); }} />
         </DialogContent>
       </Dialog>
@@ -103,10 +103,10 @@ function UserRow({ user, isMe, isAdmin, canManageProject, onSetRole, onRemove }:
       <TD><div className="font-medium">{user.name || user.email}{isMe && <span className="text-xs text-muted-foreground"> (you)</span>}</div><div className="text-xs text-muted-foreground">{user.email}</div></TD>
       <TD>{canManageProject && !isMe ? (
         <Select className="w-72" value={user.member?.role ?? ""} onChange={(e) => e.target.value ? onSetRole(e.target.value) : onRemove()}>
-          <option value="">Not on this project</option>
+          <option value="">Not on this brand</option>
           {ROLES.map((role) => <option key={role.value} value={role.value}>{role.label}</option>)}
         </Select>
-      ) : <><Badge variant="muted">{user.member?.role ?? "not on this project"}</Badge>{user.role === "admin" && <Badge variant="info" className="ml-1">account admin</Badge>}</>}</TD>
+      ) : <><Badge variant="muted">{user.member?.role ?? "not on this brand"}</Badge>{user.role === "admin" && <Badge variant="info" className="ml-1">account admin</Badge>}</>}</TD>
       <TD><StatusBadge status={user.is_active ? "healthy" : "disabled"} />{user.must_change_password && <Badge variant="warning" className="ml-1">must change password</Badge>}</TD>
       <TD className="text-xs text-muted-foreground"><TimeAgo value={user.last_login_at} fallback="never" /></TD>
       <TD className="text-right whitespace-nowrap">

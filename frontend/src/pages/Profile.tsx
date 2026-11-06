@@ -18,7 +18,7 @@ export function ProfilePage() {
   if (!me) return null;
   return (
     <div>
-      <PageHeader title="Your profile" info="Your account on this installation. Only an administrator can change your role, email or access to projects." />
+      <PageHeader title="Your profile" info="Your account on this installation. Only an administrator can change your role, email or access to brands." />
       <div className="grid gap-4 lg:grid-cols-2">
         <AccountCard me={me} />
         <NameCard me={me} />

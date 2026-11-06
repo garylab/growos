@@ -49,7 +49,7 @@ export function JobsPage() {
 
   return (
     <div>
-      <PageHeader title="Jobs" info="Every background job this project has run: crawls, syncs, AI sampling, content writing and plan rebuilds. Running jobs refresh automatically." />
+      <PageHeader title="Jobs" info="Every background job this brand has run: crawls, syncs, AI sampling, content writing and plan rebuilds. Running jobs refresh automatically." />
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <Select className="w-64" value={type} onChange={(e) => setType(e.target.value)}>
           <option value="">All types</option>

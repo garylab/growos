@@ -127,7 +127,7 @@ def assign(item_id: uuid.UUID, body: AssignIn, project: Project = Depends(get_pr
         if not can_assign_others and body.user_id != principal.id:
             raise HTTPException(403, "You can only assign items to yourself")
         if body.user_id not in _people(db, project.id):
-            raise HTTPException(400, "That user is not a member of this project")
+            raise HTTPException(400, "That user is not a member of this brand")
     elif not can_assign_others and i.assignee_id not in (None, principal.id):
         raise HTTPException(403, "Only the assignee, an owner or an administrator can unassign this item")
     i.assignee_id = body.user_id
