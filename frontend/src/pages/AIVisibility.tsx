@@ -169,9 +169,9 @@ function VisibilityTab({ pid }: { pid: string }) {
               series={competitorSeries} />
           </CardContent></Card>
       )}
-      <section>
+      <section className="w-full min-w-0">
         <CardHeader><CardTitle info="Rates are the share of repeated samples. “Pos.” is the average order of first appearance among tracked entities (1 = mentioned first). “Shown” is how often the surface produced an answer at all — Google runs no AI Overview for many queries, and a brand rate of 0% across answers that never appeared means something different from being left out of one.">By prompt and provider</CardTitle></CardHeader>
-        <CardContent>
+        <CardContent className="w-full">
           <div className="mb-3 flex gap-2"><SearchBox className="w-[32rem]" placeholder="Filter prompts or providers…" value={filter} onSearch={setFilter} /><div className="ml-auto"><CsvExportButton filename="ai-visibility-by-prompt.csv" rows={promptRows} columns={PROMPT_ROW_COLUMNS} /></div></div>
           <Table>
             <THead><TR><TH>Prompt</TH><TH>Provider</TH><TH>Samples</TH><TH>Shown</TH><TH>Grounded</TH><TH>Brand</TH><TH>Pos.</TH><TH>Own site cited</TH><TH>Competitors</TH><TH>Top cited domains</TH></TR></THead>
