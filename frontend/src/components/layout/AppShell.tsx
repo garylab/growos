@@ -89,7 +89,7 @@ export function AppShell() {
           navOpen ? "translate-x-0" : "-translate-x-full",
         )}
       >
-        <div className="px-4 py-4 border-b flex items-center justify-between">
+        <div className="px-4 py-4 flex items-center justify-between">
           <div className="min-w-0">
             <div className="text-lg font-bold tracking-tight">GrowOS</div>
             <div className="flex items-center gap-1 text-xs text-muted-foreground" title="Background worker status">
@@ -99,7 +99,7 @@ export function AppShell() {
           </div>
           <button className="lg:hidden text-muted-foreground hover:text-foreground" aria-label="Close menu" onClick={() => setNavOpen(false)}><X className="h-5 w-5" /></button>
         </div>
-        <div className="px-3 py-3 border-b">
+        <div className="px-3 pt-3 pb-5 border-b">
           <Select className="w-full" value={projectId ?? ""} onChange={(e) => { if (e.target.value === "__new") navigate("/setup"); else setProjectId(e.target.value); }}>
             {projects?.map((p) => <option key={p.id} value={p.id}>{p.brand_name || p.name}</option>)}
             <option value="__new">+ New brand…</option>
