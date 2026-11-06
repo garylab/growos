@@ -21,6 +21,7 @@ import { SearchBox } from "@/components/ui/search-box";
 import { cn, delta, fmtInt, fmtNum, fmtPct } from "@/lib/utils";
 import { fmtDateTime } from "@/lib/time";
 import { TimeAgo } from "@/components/ui/time";
+import { TargetKeywordsTab } from "@/pages/SeoTargetKeywords";
 
 interface CrawlRun { id: string; domain_id: string; finished_at: string | null; started_at: string; total_urls: number; html_pages: number; count_by_status: Record<string, number>; quality_scores: { overall?: { score: number; label: string }; categories?: { code: string; score: number; name: string }[] }; summary: { aplCode: string; status: string; text: string }[]; findings_count: Record<string, number>; provider_version: string | null }
 interface Page { id: string; url: string; path: string; status_code: number | null; title: string | null; meta_description: string | null; h1: string | null; response_time_ms: number | null; seo_score: number | null; findings: number; robots_index: boolean | null }
@@ -41,6 +42,7 @@ const SEO_TAB_META: Record<string, { title: string; info: string }> = {
   "page-performance": { title: "Page performance", info: "Core Web Vitals and Lighthouse scores measured through PageSpeed Insights." },
   "backlinks": { title: "Backlinks", info: "Referring domains and individual backlinks from the connected backlink provider." },
   "rankings": { title: "Rankings", info: "Tracked keyword positions on live search engine result pages, with movement since the last check." },
+  "keywords": { title: "Keywords", info: "Choose the searches you want to rank for, review keyword metrics, and promote discovered ideas." },
   "history": { title: "Crawl history", info: "Past crawls over time, and a side-by-side comparison of any two snapshots." },
 };
 
@@ -96,7 +98,7 @@ export function SeoPage() {
                 {rankings.data!.providers!.map((k) => <option key={k} value={k}>{k}</option>)}
               </Select>
             )}
-            <Button onClick={rerun} disabled={enqueue.isPending}>Re-run</Button>
+            {tab !== "keywords" && <Button onClick={rerun} disabled={enqueue.isPending}>Re-run</Button>}
           </>
         }
       />
@@ -106,6 +108,7 @@ export function SeoPage() {
       {tab === "page-performance" && <PerformanceTab pid={pid} domain={domain} />}
       {tab === "backlinks" && <BacklinksTab pid={pid} domain={domain} />}
       {tab === "rankings" && <RankingsTab pid={pid} domain={domain} engine={rankEngine} />}
+      {tab === "keywords" && <TargetKeywordsTab pid={pid} />}
       {tab === "history" && <HistoryTab pid={pid} domain={domain} />}
     </div>
   );

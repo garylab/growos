@@ -24,6 +24,7 @@ const seo: NavTab[] = [
   { id: "page-performance", label: "Page performance" },
   { id: "backlinks", label: "Backlinks" },
   { id: "rankings", label: "Rankings" },
+  { id: "keywords", label: "Keywords" },
   { id: "history", label: "Crawl history" },
 ];
 const geo: NavTab[] = [

@@ -269,13 +269,10 @@ def add_member(body: MemberIn, project: Project = Depends(get_project), db: Sess
 @router.put("/projects/{project_id}/members/{user_id}/role", response_model=MemberOut)
 def set_member_role(user_id: uuid.UUID, body: RoleIn, project: Project = Depends(get_project),
                     db: Session = Depends(get_db), principal: Principal = Depends(get_principal)):
-    """Set a person's single role: admin (account-wide) or owner/editor/viewer on this project.
-
-    One endpoint for both stored columns so the UI never has to make two calls that can half-fail.
-    """
+    """Set a person's role on this project without changing their account-level permissions."""
     from app.api.deps import member_role
-    if body.role not in ROLES:
-        raise HTTPException(400, f"role must be one of {ROLES}")
+    if body.role not in MEMBER_ROLES:
+        raise HTTPException(400, f"role must be one of {MEMBER_ROLES}")
     user = db.get(User, user_id)
     if user is None:
         raise HTTPException(404, "User not found")
@@ -284,23 +281,13 @@ def set_member_role(user_id: uuid.UUID, body: RoleIn, project: Project = Depends
     is_owner = bool(principal.id) and member_role(db, project.id, principal.id) == "owner"
     if not (principal.is_admin or is_owner):
         raise HTTPException(403, "Only an administrator or the project owner can change roles")
-    account_role, project_role = split_role(body.role)
-    # Granting or removing account-wide admin is an administrator's call, never a project owner's.
-    if not principal.is_admin and (body.role == "admin" or user.is_admin):
-        raise HTTPException(403, "Only an administrator can grant or remove administrator access")
-    if user.is_admin and account_role != "admin" and user.is_active:
-        admins = db.scalar(select(func.count()).select_from(User).where(User.role == "admin", User.is_active.is_(True)))
-        if admins <= 1:
-            raise HTTPException(400, "This is the last active administrator")
-    user.role = account_role
     member = db.scalar(select(ProjectMember).where(ProjectMember.project_id == project.id,
                                                    ProjectMember.user_id == user.id))
     if member is None:
-        # Promoting someone who is not on this project yet still needs a row so they show up in the list.
-        member = ProjectMember(project_id=project.id, user_id=user.id, role=project_role or "editor")
+        member = ProjectMember(project_id=project.id, user_id=user.id, role=body.role)
         db.add(member)
-    elif project_role:
-        member.role = project_role  # admins keep their previous project role, so demoting restores it
+    else:
+        member.role = body.role
     db.commit()
     db.refresh(member)
     db.refresh(user)

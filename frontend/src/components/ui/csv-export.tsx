@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { RefreshCw } from "lucide-react";
+import { Download, RefreshCw } from "lucide-react";
 import { Button } from "./button";
 import { Dialog, DialogContent } from "./dialog";
 
@@ -57,7 +57,9 @@ export function CsvExportButton<T>({ filename, rows, columns, defaultSelected, l
         <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
-        <Button size="sm" variant="outline" onClick={() => setOpen(true)}>{label}</Button>
+        <Button size="icon" variant="outline" onClick={() => setOpen(true)} aria-label={label} title={label}>
+          <Download className="h-4 w-4" />
+        </Button>
         <DialogContent title="Export CSV" description={`${rows.length} matching row${rows.length === 1 ? "" : "s"}. Select the columns to include.`}>
           <div className="flex items-center justify-between gap-3 border-b pb-3">
             <span className="text-sm text-muted-foreground">{chosen.length} of {columns.length} columns selected</span>

@@ -65,7 +65,7 @@ class MemberIn(BaseModel):
 
 
 class RoleIn(BaseModel):
-    """One unified role: admin | owner | editor | viewer."""
+    """Role on one project: owner | editor | viewer."""
     role: str
 
 
