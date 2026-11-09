@@ -39,8 +39,47 @@ ANALYTICS_PATTERNS = {
 }
 EMAIL_CAPTURE_HINTS = re.compile(r"(newsletter|subscribe|sign ?up for|join .{0,20}list|get updates|free trial|waitlist|early access)", re.I)
 
+# Emails printed as visible text rather than wrapped in a mailto: link.
+EMAIL_RE = re.compile(r"[a-z0-9][a-z0-9._%+-]*@[a-z0-9.-]+\.[a-z]{2,24}", re.I)
+# File extensions that otherwise look like a TLD, so retina asset names (logo@2x.png) are not mistaken for addresses.
+_ASSET_EXTS = frozenset(("png", "jpg", "jpeg", "gif", "svg", "webp", "avif", "ico", "css", "js", "mjs",
+                         "json", "map", "html", "htm", "woff", "woff2", "ttf", "eot", "pdf", "mp4", "webm"))
+
+
+def _decode_cfemail(hex_str: str) -> str | None:
+    """Reverse Cloudflare's email obfuscation (`data-cfemail` / `/cdn-cgi/l/email-protection#<hex>`).
+
+    The first byte is an XOR key; every following byte XOR'd with it yields the original ASCII. Cloudflare rewrites
+    on-page addresses into this form and decodes them in the browser, so without this an otherwise-public contact
+    email is invisible to a static fetch.
+    """
+    try:
+        raw = bytes.fromhex(hex_str.strip())
+    except ValueError:
+        return None
+    if len(raw) < 2:
+        return None
+    key = raw[0]
+    addr = "".join(chr(b ^ key) for b in raw[1:])
+    return addr.lower() if "@" in addr and "." in addr.split("@")[-1] else None
+
 # Elements a client-side framework mounts into. Empty in the HTML we receive, filled in by the browser.
 SPA_MOUNTS = ("#root", "#app", "#__next", "#__nuxt", "#q-app", "[data-reactroot]", "[data-server-rendered]")
+
+
+def serves_brotli(url: str) -> bool | None:
+    """Whether the server returns Brotli when a client explicitly asks for it. None if the check could not run.
+
+    SiteOne's crawler (and our default fetch) do not advertise `Accept-Encoding: br`, so a site that serves Brotli
+    — e.g. anything behind Cloudflare, where it is on by default — is wrongly reported as not supporting it. We ask
+    for it directly and read the response's content-encoding. The body may come back still-encoded (httpx has no
+    brotli decoder in this image), but the header is all we need, and safe_get passes the raw bytes through.
+    """
+    try:
+        resp = safe_get(url, timeout=15, headers={"Accept-Encoding": "br"})
+    except Exception:  # noqa: BLE001 — a failed probe must never break signal collection
+        return None
+    return resp.headers.get("content-encoding", "").lower() == "br"
 
 
 def looks_unrendered(html: str) -> bool:
@@ -118,6 +157,12 @@ def extract_signals(html: str, page_url: str) -> dict[str, Any]:
             addr = href[7:].split("?")[0].strip().lower()
             if "@" in addr and addr not in emails:
                 emails.append(addr)
+        elif "/cdn-cgi/l/email-protection#" in low:
+            decoded = _decode_cfemail(href.split("#", 1)[1])
+            if decoded and decoded not in emails:
+                if mailto is None:
+                    mailto = f"mailto:{decoded}"
+                emails.append(decoded)
         else:
             host = (urlsplit(href).hostname or "").lower().removeprefix("www.")
             if host and any(host == d or host.endswith("." + d) for d in SOCIAL_DOMAINS) and href not in social:
@@ -145,6 +190,20 @@ def extract_signals(html: str, page_url: str) -> dict[str, Any]:
         if ld_logo:
             break
 
+    # --- email addresses that are not mailto: links
+    body_text = tree.body.text(separator=" ", strip=True)[:20000] if tree.body else ""
+    # Cloudflare-obfuscated spans (the anchor-less form, decoded in the href loop above when wrapped in a link).
+    for span in tree.css(".__cf_email__"):
+        decoded = _decode_cfemail(span.attributes.get("data-cfemail") or "")
+        if decoded and decoded not in emails:
+            emails.append(decoded)
+    # Addresses printed as plain visible text ("reach us at hello@brand.com"). Body text only, so we skip emails
+    # buried in scripts, tracking DSNs or JSON blobs.
+    for addr in EMAIL_RE.findall(body_text):
+        addr = addr.lower()
+        if addr.rsplit(".", 1)[-1] not in _ASSET_EXTS and addr not in emails:
+            emails.append(addr)
+
     # --- email on the company's own domain vs a free provider
     own_domain_emails = [e for e in emails if e.split("@")[-1] in (site_host, f"www.{site_host}") or e.split("@")[-1].endswith("." + site_host)]
     free_emails = [e for e in emails if e.split("@")[-1] in FREE_EMAIL_DOMAINS]
@@ -159,7 +218,6 @@ def extract_signals(html: str, page_url: str) -> dict[str, Any]:
     email_input = bool(tree.css('input[type="email"]')) or any(
         "email" in ((n.attributes.get("name") or "") + (n.attributes.get("id") or "") + (n.attributes.get("placeholder") or "")).lower()
         for n in tree.css("input"))
-    body_text = tree.body.text(separator=" ", strip=True)[:20000] if tree.body else ""
     email_capture = email_input and bool(EMAIL_CAPTURE_HINTS.search(body_text))
 
     # --- physical presence (Google Business Profile relevance)

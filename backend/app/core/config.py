@@ -59,6 +59,8 @@ class Settings(BaseSettings):
     # for PageSpeed/CrUX and is normally restricted to those APIs, so it cannot answer for the Generative
     # Language API. Optional; a key entered on the connection overrides it.
     gemini_api_key: str = Field(default="", alias="GEMINI_API_KEY")
+    openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
+    embedding_provider: str = Field(default="local", alias="EMBEDDING_PROVIDER")  # local | openai | gemini
     # App-level SerpApi key, shared by the three SerpApi providers (live SERP, AI surfaces, Extract). Optional:
     # a key entered on a connection overrides it. See ENV_CREDENTIALS in app.services.providers.
     serpapi_api_key: str = Field(default="", alias="SERPAPI_API_KEY")

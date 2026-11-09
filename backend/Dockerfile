@@ -27,7 +27,14 @@ subprocess.check_call([sys.executable, "-m", "pip", "install", *deps])
 PY
 COPY . .
 
-RUN useradd --create-home --uid 10001 growos && mkdir -p /data/artifacts && chown -R growos:growos /data /app
+# Bake the local embedding model into the image so matching needs no embedding API, credits or network at runtime.
+ENV HF_HOME=/opt/hf
+RUN python - <<'PY'
+from model2vec import StaticModel
+StaticModel.from_pretrained("minishlab/potion-base-8M")
+PY
+
+RUN useradd --create-home --uid 10001 growos && mkdir -p /data/artifacts && chown -R growos:growos /data /app /opt/hf
 ENV ARTIFACTS_DIR=/data/artifacts
 ENTRYPOINT ["/usr/bin/tini", "--"]
 

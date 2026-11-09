@@ -12,6 +12,15 @@ from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 
 ACTION_STATUSES = ("planned", "in_progress", "done", "cancelled")
 
+# Growth-plan statuses (todo/in_progress/done/skipped) map onto action statuses here — in one place, so the two
+# vocabularies cannot drift. Used when a plan item is promoted into a tracked result.
+PLAN_TO_ACTION_STATUS = {"todo": "planned", "in_progress": "in_progress", "done": "done", "skipped": "cancelled"}
+
+
+def plan_status_to_action(plan_status: str) -> str:
+    """The action status that corresponds to a plan item's status. Unknown values fall back to 'planned'."""
+    return PLAN_TO_ACTION_STATUS.get(plan_status, "planned")
+
 
 class ActionRecord(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """An optimization action the user commits to (optionally derived from an opportunity)."""
@@ -19,6 +28,10 @@ class ActionRecord(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     project_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
     plan_item_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("plan_items.id", ondelete="SET NULL"), index=True)
+    # The plan item's stable key, stored alongside the id so the link survives plan regeneration: the playbook
+    # upserts plan items by key, but a key change gives a new row (and SET NULL orphans plan_item_id). The key lets
+    # us re-resolve the current plan item. See app/api/routes/actions.py:_plan_items_for.
+    plan_item_key: Mapped[str | None] = mapped_column(String(300), index=True)
     title: Mapped[str] = mapped_column(String(300), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(20), default="planned", nullable=False, index=True)

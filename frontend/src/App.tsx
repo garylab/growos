@@ -6,7 +6,7 @@ import { ChangePassword, Login } from "@/pages/Login";
 import { TeamPage } from "@/pages/Team";
 import { Setup } from "@/pages/Setup";
 import { Overview } from "@/pages/Overview";
-import { PlanPage } from "@/pages/Plan";
+import { PlanPage, PlanItemPage } from "@/pages/Plan";
 import { SeoPage } from "@/pages/Seo";
 import { AIVisibilityPage } from "@/pages/AIVisibility";
 import { BrandPage } from "@/pages/Brand";
@@ -73,12 +73,14 @@ function Gate() {
         <Route index element={<Overview />} />
         <Route path="/overview" element={<Navigate to="/" replace />} />
         <Route path="/plan" element={<PlanPage />} />
+        <Route path="/plan/:itemId" element={<PlanItemPage />} />
         <Route path="/scorecard" element={<Navigate to="/" replace />} />
         <Route path="/seo/:tab?/:view?" element={<SeoPage />} />
         <Route path="/geo/:tab?" element={<AIVisibilityPage />} />
         <Route path="/brand/:tab?" element={<BrandPage />} />
         <Route path="/competitors/:tab?" element={<CompetitorsPage />} />
-        <Route path="/actions" element={<ActionsPage />} />
+        <Route path="/results" element={<ActionsPage />} />
+        <Route path="/actions" element={<Navigate to="/results" replace />} />
         <Route path="/jobs" element={<JobsPage />} />
         <Route path="/integrations" element={<IntegrationsPage />} />
         <Route path="/team" element={<TeamPage />} />

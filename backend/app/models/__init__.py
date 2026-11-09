@@ -4,6 +4,7 @@ from app.models.content import ContentDraft
 from app.models.geo import AIAnswerMention, AIAnswerObservation, PromptDefinition
 from app.models.growth import ActionRecord, OutcomeMeasurement
 from app.models.jobs import CollectionJob, JobLog, RawArtifact, Schedule
+from app.models.submission import SubmissionTarget
 from app.models.notification import Notification
 from app.models.scorecard import ScorecardSnapshot
 from app.models.oauth import GoogleLoginState, OAuthState
@@ -24,5 +25,5 @@ __all__ = [
     "ReferringDomain",
     "SearchObservation", "BingSearchObservation", "PromptDefinition", "AIAnswerObservation", "AIAnswerMention",
     "BrandMention", "CompetitorObservation", "AnalyticsEvent",
-    "ActionRecord", "OutcomeMeasurement",
+    "ActionRecord", "OutcomeMeasurement", "SubmissionTarget",
 ]

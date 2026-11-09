@@ -140,12 +140,27 @@ FIX_RULES: dict[str, dict[str, Any]] = {
     "broken_link":              {"title": "Fix {n} broken link(s)", "why": "Broken links waste crawl budget and lose visitors.", "impact": 60, "effort": 1, "category": "website", "steps": ["Fix the destination or redirect it (301)", "Update the linking page"]},
     "internal_redirect":        {"title": "Point {n} internal link(s) directly to the final URL", "why": "Redirect chains slow pages and leak link value.", "impact": 20, "effort": 1, "category": "website", "steps": ["Replace the link with the redirect target"]},
     "slow_response":            {"title": "Speed up {n} slow page(s) (server response > 1.5 s)", "why": "Slow pages rank lower and convert worse.", "impact": 55, "effort": 3, "category": "website", "steps": ["Cache the page or its data", "Check hosting/database queries", "Measure again with Lighthouse"]},
-    "security_header":          {"title": "Add missing security headers", "why": "HSTS, CSP and X-Frame-Options protect users and are a trust signal.", "impact": 30, "effort": 2, "category": "website", "steps": ["Add Strict-Transport-Security, Content-Security-Policy, X-Content-Type-Options, X-Frame-Options, Referrer-Policy at the proxy/CDN"]},
+    "security_header":          {"title": "Add missing security headers", "why": "HSTS, CSP and X-Frame-Options protect users against XSS, clickjacking and MITM, and are a trust signal browsers and scanners check.", "impact": 30, "effort": 2, "category": "website",
+                                 "steps": ["Check what is actually missing first — many sites already send most of these: `curl -sI https://your-domain.com | grep -iE 'content-security|strict-transport|x-frame|x-content-type|referrer-policy|permissions-policy'`. Only add the ones that are absent.",
+                                           "Content-Security-Policy is the important and hardest one, and usually the only one missing. Start in report-only so nothing breaks: `Content-Security-Policy-Report-Only: default-src 'self'; img-src 'self' data: https:; script-src 'self'; style-src 'self' 'unsafe-inline'`. Watch for violations, loosen as needed, then switch the header name to `Content-Security-Policy` to enforce.",
+                                           "Add any of the rest that are missing: `Strict-Transport-Security: max-age=31536000; includeSubDomains`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy: geolocation=(), camera=(), microphone=()`.",
+                                           "Set them where your responses are built — Cloudflare: Rules → Transform Rules → Modify Response Header. Nginx: `add_header` in the server block. Apache: `Header set`. Next.js: the `headers()` function in next.config.js.",
+                                           "Verify with the curl above or securityheaders.com, then re-run the audit."]},
 }
 SITE_RULES = {
-    "site_brotli_support": {"title": "Enable Brotli compression", "why": "Smaller pages load faster.", "impact": 25, "effort": 1, "steps": ["Enable Brotli on your CDN or web server"]},
-    "site_webp_support": {"title": "Serve images as WebP/AVIF", "why": "Modern formats cut image weight by 30-50%.", "impact": 30, "effort": 2, "steps": ["Convert images or enable automatic format conversion on the CDN"]},
-    "site_avif_support": {"title": "Serve images as AVIF where supported", "why": "AVIF is smaller than WebP.", "impact": 15, "effort": 2, "steps": ["Enable AVIF on the image pipeline/CDN"]},
+    "site_brotli_support": {"title": "Enable Brotli compression", "why": "Brotli shrinks HTML, CSS and JavaScript 15-25% more than gzip, so pages download and render faster — a ranking and conversion signal.", "impact": 25, "effort": 1,
+                            "steps": ["On Cloudflare: Brotli is already on by default — the manual toggle was removed in 2024, so there is nothing to switch on. It auto-selects Brotli/gzip per visitor; tune it only if needed under Rules → Compression Rules. On Fastly/CloudFront: enable Brotli in the compression/behaviour settings.",
+                                      "On Nginx: add the ngx_brotli module, then `brotli on; brotli_comp_level 5; brotli_types text/html text/css application/javascript application/json image/svg+xml;` and reload.",
+                                      "On Apache: enable mod_brotli, then `AddOutputFilterByType BROTLI_COMPRESS text/html text/css application/javascript application/json image/svg+xml` and restart.",
+                                      "Verify: `curl -s -H 'Accept-Encoding: br' -I https://your-domain.com` should return `content-encoding: br`. Then re-run the audit."]},
+    "site_webp_support": {"title": "Serve images as WebP/AVIF", "why": "Modern formats cut image weight 30-50%, so pages load faster.", "impact": 30, "effort": 2,
+                          "steps": ["Easiest is automatic format negotiation: Next.js → `images: { formats: ['image/avif','image/webp'] }` in next.config.js; Cloudflare → Polish (Pro+); Cloudinary → `f_auto`; imgix → `auto=format`.",
+                                    "No image CDN? Convert at build time (sharp, `cwebp`, Squoosh) and serve `<picture>` with WebP/AVIF sources plus a PNG/JPEG fallback.",
+                                    "Verify: `curl -H 'Accept: image/webp' -I <image-url>` should return `content-type: image/webp`, then re-run the audit."]},
+    "site_avif_support": {"title": "Serve images as AVIF where supported", "why": "AVIF is ~20% smaller than WebP for the same quality.", "impact": 15, "effort": 2,
+                          "steps": ["Next.js: put `image/avif` first in `images.formats`. Cloudflare Polish, Cloudinary (`f_auto`) and imgix (`auto=format`) negotiate AVIF automatically once enabled.",
+                                    "For static assets, generate `.avif` alongside `.webp` (sharp or `avifenc`) and list it first in `<picture>`.",
+                                    "Verify: `curl -H 'Accept: image/avif' -I <image-url>` should return `content-type: image/avif`, then re-run the audit."]},
     "site_ssl_protocol_unsafe": {"title": "Disable TLS 1.0/1.1", "why": "Old TLS versions are insecure and flagged by security scanners.", "impact": 25, "effort": 1, "steps": ["Allow TLS 1.2+ only on the load balancer/CDN"]},
 }
 
@@ -157,11 +172,17 @@ def fix_items(db: Session, project: Project) -> list[Draft]:
         run = D.latest_crawl_run(db, domain.id)
         if not run:
             continue
+        home = db.scalar(select(PageSnapshot).where(PageSnapshot.crawl_run_id == run.id, PageSnapshot.path == "/"))
+        sig = (home.signals or {}) if home else {}
         findings = D.crawl_findings(db, run.id, ("critical", "warning", "info"))
         by_code: dict[str, list] = defaultdict(list)
         for f in findings:
             by_code[f.code].append(f)
         for code, fs in by_code.items():
+            # SiteOne's probe never sends Accept-Encoding: br, so it flags Brotli as missing even on sites that serve
+            # it. When our own home-page check confirmed Brotli, drop the false finding so it does not become a task.
+            if code == "site_brotli_support" and sig.get("serves_brotli"):
+                continue
             rule = FIX_RULES.get(code) or SITE_RULES.get(code)
             if not rule:
                 continue
@@ -172,8 +193,6 @@ def fix_items(db: Session, project: Project) -> list[Draft]:
                              evidence=[{"table": "audit_findings", "record_ids": [str(f.id) for f in fs[:50]], "summary": f"{len(fs)} finding(s) in crawl {str(run.id)[:8]}"}],
                              source=f"crawl:{code}"))
         # Conversion & brand signals on the home page
-        home = db.scalar(select(PageSnapshot).where(PageSnapshot.crawl_run_id == run.id, PageSnapshot.path == "/"))
-        sig = (home.signals or {}) if home else {}
         if home and sig.get("checked"):
             if not (sig.get("chat_link") or sig.get("tel") or sig.get("mailto")):
                 out.append(Draft(f"fix:{domain.id}:contact_channel", "fix", "conversion", "Add a direct contact channel (WhatsApp click-to-chat, phone or email)",

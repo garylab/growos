@@ -95,6 +95,27 @@ def test_business_signals_email_and_logo():
     assert s["own_domain_emails"] == ["hello@x.test"] and s["free_emails"] == ["acme@gmail.com"]
 
 
+def test_business_signals_cloudflare_and_plaintext_email():
+    from app.services.page_signals import _decode_cfemail, extract_signals
+
+    # Cloudflare encodes "contact@x.test"; first hex byte is the XOR key.
+    key = 0x2a
+    enc = bytes([key]) + bytes(ord(c) ^ key for c in "contact@x.test")
+    cf = enc.hex()
+    assert _decode_cfemail(cf) == "contact@x.test"
+    assert _decode_cfemail("") is None and _decode_cfemail("zz") is None
+
+    html = f"""<html><body>
+      <a href="/cdn-cgi/l/email-protection#{cf}"><span class="__cf_email__" data-cfemail="{cf}"></span></a>
+      <p>Or just email founder@x.test directly. See logo@2x.png in the header.</p></body></html>"""
+    s = extract_signals(html, "https://x.test/")
+    # Cloudflare-protected and plaintext addresses are both recovered; the asset filename is not.
+    assert set(s["own_domain_emails"]) == {"contact@x.test", "founder@x.test"}
+    assert "logo@2x.png" not in s["emails"]
+    # A synthetic mailto is offered so downstream outreach has a usable address even without a real link.
+    assert s["mailto"] == "mailto:contact@x.test"
+
+
 def test_business_signals_missing():
     from app.services.page_signals import extract_signals
     s = extract_signals('<html><head></head><body><a href="mailto:me@gmail.com">m</a></body></html>', "https://x.test/")

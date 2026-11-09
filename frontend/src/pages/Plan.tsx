@@ -1,13 +1,15 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
-import { ArrowRight, Bot, Briefcase, Check, ChevronDown, ChevronRight, Clock, ExternalLink, FileText, Globe, Link2, Megaphone, MessagesSquare, Minus, Plug, Sparkles, Square, SquareCheck, Target, Undo2, Users, Video } from "lucide-react";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import { ArrowRight, Bot, Briefcase, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ChevronsUpDown, Clock, Download, ExternalLink, FileText, Globe, Link2, Megaphone, MessagesSquare, Minus, Plug, RefreshCw, Target, Undo2, Users, Video } from "lucide-react";
 import { api, type ContentDraft, type Job, type Writer } from "@/lib/api";
-import { useProjectId } from "@/hooks/useProject";
+import { useProject, useProjectId } from "@/hooks/useProject";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge, StatusBadge } from "@/components/ui/badge";
 import { Select, Textarea } from "@/components/ui/input";
+import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
+import { SearchBox } from "@/components/ui/search-box";
 import { useAppStore } from "@/store/app";
 import { PenLine, Sparkles as SparkIcon } from "lucide-react";
 import { EmptyState, ErrorBox, InfoHint, Loading, PageHeader } from "@/components/ui/misc";
@@ -32,6 +34,38 @@ const CATEGORY_LABEL: Record<string, string> = {
   business: "Business basics", setup: "Setup",
 };
 const CADENCE_LABEL: Record<string, string> = { daily: "Every day", weekly: "Every week", monthly: "Every month", once: "One time" };
+const GROUP_LABEL: Record<string, string> = { setup: "Start here", business: "Business basics", fix: "Fix once", routine: "Keep doing" };
+const GROUP_ORDER: Record<string, number> = { setup: 0, business: 1, fix: 2, routine: 3 };
+
+/** The whole plan as Markdown, so it can be pasted into an AI assistant to work through or fix. Exports every
+ *  item regardless of the on-screen filters. */
+function planToMarkdown(data: Plan, project: string): string {
+  const item = (i: PlanItem, n: number): string => {
+    const meta = [
+      `status: ${i.status}`,
+      `category: ${CATEGORY_LABEL[i.category] ?? i.category}`,
+      i.cadence && i.cadence !== "once" ? `cadence: ${CADENCE_LABEL[i.cadence] ?? i.cadence}` : null,
+      `impact: ${Math.round(i.impact)}`,
+      `priority: ${i.priority}`,
+    ].filter(Boolean);
+    const L = [`### ${n}. ${i.title}`, `- ${meta.join(" · ")}`];
+    if (i.affects?.length) L.push(`- Improves: ${i.affects.map((a) => a.label).join(", ")}`);
+    if (i.why) L.push(`- Why: ${i.why}`);
+    if (i.target_urls?.length) L.push(`- Target URLs: ${i.target_urls.join(", ")}`);
+    if (i.target_keywords?.length) L.push(`- Target keywords: ${i.target_keywords.join(", ")}`);
+    if (i.steps?.length) L.push(`- Steps:`, ...i.steps.map((st, k) => `  ${k + 1}. ${st}`));
+    return L.join("\n");
+  };
+  const section = (title: string, items: PlanItem[]): string[] =>
+    items.length ? [`## ${title} (${items.length})`, "", ...items.map((i, idx) => item(i, idx + 1) + "\n")] : [];
+  return [
+    `# Growth Plan — ${project}`, "", `Exported ${new Date().toISOString().slice(0, 10)}`, "",
+    ...section("Start here", data.setup),
+    ...section("Business basics", data.business ?? []),
+    ...section("Fix once", data.fix),
+    ...section("Keep doing (routines)", data.routine),
+  ].join("\n");
+}
 const CATEGORY_ICON: Record<string, { icon: typeof Globe; color: string }> = {
   website: { icon: Globe, color: "text-sky-600 bg-sky-100 dark:bg-sky-900/40 dark:text-sky-300" },
   content: { icon: FileText, color: "text-violet-600 bg-violet-100 dark:bg-violet-900/40 dark:text-violet-300" },
@@ -57,7 +91,7 @@ function CategoryIcon({ category }: { category: string }) {
 const APP_PAGES: { label: string; route: (step: string) => string }[] = [
   { label: "GEO AI Visibility", route: (s) => (/prompt/i.test(s) ? "/geo/prompts" : "/geo/visibility") },
   { label: "Growth Opportunities", route: () => "/opportunities/opportunities" },
-  { label: "Actions & Results", route: () => "/actions" },
+  { label: "Results", route: () => "/results" },
   { label: "Brand Monitoring", route: () => "/brand/mentions" },
   { label: "Brand Intelligence", route: () => "/brand/mentions" },
   { label: "SEO Performance", route: (s) => (/search console|search performance|property|sync/i.test(s) ? "/seo/search-performance"
@@ -120,27 +154,59 @@ export function PlanPage() {
   const pid = useProjectId();
   const qc = useQueryClient();
   const { data, isLoading, error } = useQuery({ queryKey: ["plan", pid], queryFn: () => api.get<Plan>(`/projects/${pid}/plan`), enabled: !!pid, refetchInterval: 20000 });
+  const { data: project } = useProject();
+  const { data: linked } = useQuery({ queryKey: ["linked-actions", pid], queryFn: () => api.get<Record<string, { action_id: string; status: string }>>(`/projects/${pid}/actions/linked`), enabled: !!pid });
   const generate = useMutation({ mutationFn: () => api.post<Job>(`/projects/${pid}/plan/generate`), onSuccess: () => { qc.invalidateQueries({ queryKey: ["jobs"] }); setTimeout(() => qc.invalidateQueries({ queryKey: ["plan", pid] }), 6000); } });
-  const [showDone, setShowDone] = useState(false);
+  const downloadPlan = () => {
+    if (!data) return;
+    const name = project?.name ?? "project";
+    const blob = new Blob([planToMarkdown(data, name)], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `growth-plan-${name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+  const [group, setGroup] = useState("");
+  const [category, setCategory] = useState("");
+  const [statusF, setStatusF] = useState<"open" | "done" | "all">("open");
   const [mineOnly, setMineOnly] = useState(false);
+  const [q, setQ] = useState("");
+  const [sort, setSort] = useState<{ key: "group" | "impact"; dir: "asc" | "desc" }>({ key: "group", dir: "asc" });
   const me = useAppStore((st) => st.user);
   if (isLoading) return <Loading />;
   if (error) return <ErrorBox error={error} />;
   if (!data) return null;
   const s = data.summary;
-  const mine = (i: PlanItem) => !mineOnly || (me?.id ? i.assignee_id === me.id : false);
-  const openSetup = data.setup.filter((i) => (showDone || i.status === "todo" || i.status === "in_progress") && mine(i));
-  const openFix = data.fix.filter((i) => (showDone || i.status === "todo" || i.status === "in_progress") && mine(i));
-  const openBusiness = (data.business ?? []).filter((i) => (showDone || i.status === "todo" || i.status === "in_progress") && mine(i));
-  const routines = data.routine.filter((i) => (showDone || i.status !== "skipped") && mine(i));
-  const empty = !data.setup.length && !data.fix.length && !data.routine.length && !(data.business ?? []).length;
+  const all = [...data.setup, ...(data.business ?? []), ...data.fix, ...data.routine];
+  const empty = all.length === 0;
+  const isOpen = (i: PlanItem) => i.section === "routine" ? i.status !== "skipped" : (i.status === "todo" || i.status === "in_progress");
+  const isDone = (i: PlanItem) => i.section === "routine" ? (i.completions?.length ?? 0) > 0 : i.status === "done";
+  const categories = Array.from(new Set(all.map((i) => i.category)));
+  const filtered = all.filter((i) => {
+    if (group && i.section !== group) return false;
+    if (category && i.category !== category) return false;
+    if (mineOnly && (!me?.id || i.assignee_id !== me.id)) return false;
+    if (statusF === "open" && !isOpen(i)) return false;
+    if (statusF === "done" && !isDone(i)) return false;
+    if (q.trim() && !i.title.toLowerCase().includes(q.trim().toLowerCase())) return false;
+    return true;
+  });
+  const rows = [...filtered].sort((a, b) => {
+    const base = sort.key === "impact"
+      ? a.impact - b.impact
+      : ((GROUP_ORDER[a.section] ?? 9) - (GROUP_ORDER[b.section] ?? 9)) || (b.priority - a.priority);
+    return sort.dir === "asc" ? base : -base;
+  });
+  const sortBy = (key: "group" | "impact") => setSort((st) => st.key === key ? { key, dir: st.dir === "asc" ? "desc" : "asc" } : { key, dir: key === "impact" ? "desc" : "asc" });
+  const sortIcon = (key: "group" | "impact") => sort.key !== key ? <ChevronsUpDown className="h-3.5 w-3.5 opacity-60" /> : sort.dir === "asc" ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />;
+  const openCount = all.filter(isOpen).length;
+  const doneCount = all.filter(isDone).length;
   const cards = [
-    { show: s.setup_open > 0, label: "Start here", value: s.setup_open, hint: "Connect your data so the rest of the plan gets specific", onSelect: () => jumpTo("setup") },
-    { show: (data.business ?? []).length > 0, label: "Business basics", value: s.business_open ?? 0, hint: "Trust and customer-journey checks", onSelect: () => jumpTo("business") },
-    { show: data.fix.length > 0 || s.setup_open === 0, label: "To fix once", value: s.fix_open ?? Math.max(0, s.open_fixes - s.setup_open - (s.business_open ?? 0)), hint: "Website and content fixes waiting", onSelect: () => jumpTo("fix") },
-    { show: true, label: "Due now", value: s.routines_due, hint: `${s.routines_total ?? data.routine.length} recurring habit(s) in total`, onSelect: () => jumpTo("routine") },
-    // Completed items live inside their own sections, so this reveals them rather than scrolling somewhere.
-    { show: true, label: "Completed", value: s.done_total, hint: "Items finished and routines logged. Opens them in the lists below.", onSelect: () => setShowDone((v) => !v) },
+    { show: true, label: "To be done", value: openCount, hint: "Open items: still to do or in progress, plus routines not skipped.", onSelect: () => { setGroup(""); setStatusF("open"); } },
+    { show: true, label: "Completed", value: doneCount, hint: "Items finished and routines logged.", onSelect: () => { setGroup(""); setStatusF("done"); } },
+    { show: true, label: "Total", value: all.length, hint: "Every item in the plan, across all groups.", onSelect: () => { setGroup(""); setCategory(""); setMineOnly(false); setQ(""); setStatusF("all"); } },
   ].filter((c) => c.show);
 
   return (
@@ -148,11 +214,6 @@ export function PlanPage() {
       <PageHeader
         title="Your growth plan"
         info="Everything to do to get found more often and turn that into sales. Fix the one-time items, then keep the weekly habits going."
-        actions={<>
-          {me && <label className="flex items-center gap-1 text-xs text-muted-foreground"><input type="checkbox" checked={mineOnly} onChange={(e) => setMineOnly(e.target.checked)} /> only mine</label>}
-          <label className="flex items-center gap-1 text-xs text-muted-foreground"><input type="checkbox" checked={showDone} onChange={(e) => setShowDone(e.target.checked)} /> show completed</label>
-          <Button onClick={() => generate.mutate()} disabled={generate.isPending}><Sparkles className="h-4 w-4" /> {generate.isPending ? "Working…" : "Refresh plan"}</Button>
-        </>}
       />
       <ErrorBox error={generate.error} />
       {generate.isSuccess && <div className="mb-4 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-200">Rebuilding your plan…</div>}
@@ -161,15 +222,54 @@ export function PlanPage() {
         {cards.map((c) => <Stat key={c.label} label={c.label} value={c.value} hint={c.hint} onSelect={c.onSelect} />)}
       </div>
 
-      {empty ? (
-        <EmptyState title="No plan yet">Click <b>Refresh plan</b>, or run a website audit first under <Link className="text-primary underline" to="/seo">SEO Performance</Link>.</EmptyState>
-      ) : (
-        <div className="space-y-8">
-          {openSetup.length > 0 && <Section id="setup" title="Start here" description="Each one makes the rest of the plan more specific. Takes a few minutes." items={openSetup} pid={pid} members={data.members} />}
-          {openBusiness.length > 0 && <Section id="business" title="Business basics" description="Trust and the customer journey. Buyers, Google and AI assistants all look for these before recommending you." items={openBusiness} pid={pid} members={data.members} />}
-          {openFix.length > 0 && <Section id="fix" title="Fix once" description="Do these once and they stay fixed. The list shrinks automatically when the next audit confirms the fix." items={openFix} pid={pid} members={data.members} />}
-          {routines.length > 0 && <Section id="routine" title="Keep doing" description="The habits that compound. Tick one off each time you do it; it comes back when it is due again." items={routines} pid={pid} members={data.members} routine />}
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        {!empty && <>
+          <Select className="w-40" value={group} onChange={(e) => setGroup(e.target.value)}>
+            <option value="">All groups</option>
+            <option value="setup">Start here</option>
+            <option value="business">Business basics</option>
+            <option value="fix">Fix once</option>
+            <option value="routine">Keep doing</option>
+          </Select>
+          <Select className="w-44" value={category} onChange={(e) => setCategory(e.target.value)}>
+            <option value="">All categories</option>
+            {categories.map((c) => <option key={c} value={c}>{CATEGORY_LABEL[c] ?? c}</option>)}
+          </Select>
+          <Select className="w-36" value={statusF} onChange={(e) => setStatusF(e.target.value as "open" | "done" | "all")}>
+            <option value="open">Open</option>
+            <option value="done">Completed</option>
+            <option value="all">All</option>
+          </Select>
+          {me && <label className="flex items-center gap-1 text-xs text-muted-foreground"><input type="checkbox" checked={mineOnly} onChange={(e) => setMineOnly(e.target.checked)} /> only mine</label>}
+          <SearchBox className="w-[20rem]" placeholder="Search tasks…" value={q} onSearch={setQ} />
+        </>}
+        <div className="ml-auto flex gap-1">
+          <Button size="icon" onClick={() => generate.mutate()} disabled={generate.isPending} aria-label="Refresh plan" title="Refresh plan — rebuild it from your latest data"><RefreshCw className={cn("h-4 w-4", generate.isPending && "animate-spin")} /></Button>
+          <Button size="icon" variant="outline" onClick={downloadPlan} disabled={!data} aria-label="Download the whole plan as Markdown" title="Download the whole plan as Markdown — paste it into an AI assistant to work through"><Download className="h-4 w-4" /></Button>
         </div>
+      </div>
+      {empty ? (
+        <EmptyState title="No plan yet">Click the <b>Refresh</b> button above, or run a website audit first under <Link className="text-primary underline" to="/seo">SEO Performance</Link>.</EmptyState>
+      ) : (
+        <>
+          <Table containerClassName="rounded-md border">
+            <THead><TR>
+              <TH>Task</TH>
+              <TH>
+                <button type="button" className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => sortBy("group")}>Group {sortIcon("group")}</button>
+              </TH>
+              <TH>Category</TH><TH>Status</TH>
+              <TH className="text-right">
+                <button type="button" className="ml-auto inline-flex items-center gap-1 hover:text-foreground" onClick={() => sortBy("impact")}>Impact {sortIcon("impact")}</button>
+              </TH>
+            </TR></THead>
+            <TBody>
+              {rows.length === 0
+                ? <TR><TD colSpan={5} className="py-6 text-center text-sm text-muted-foreground">No tasks match these filters.</TD></TR>
+                : rows.map((i) => <Item key={i.id} item={i} tracked={!!linked?.[i.id]} />)}
+            </TBody>
+          </Table>
+        </>
       )}
       {s.last_generated_at && <p className="mt-8 text-xs text-muted-foreground">Plan last rebuilt <TimeAgo value={s.last_generated_at} />.</p>}
     </div>
@@ -177,8 +277,6 @@ export function PlanPage() {
 }
 
 const STAT_COLS: Record<number, string> = { 1: "lg:grid-cols-1", 2: "lg:grid-cols-2", 3: "lg:grid-cols-3", 4: "lg:grid-cols-4", 5: "lg:grid-cols-5" };
-
-const jumpTo = (section: string) => document.getElementById(`plan-${section}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
 
 function Stat({ label, value, hint, onSelect }: { label: string; value: number; hint: string; onSelect: () => void }) {
   return (
@@ -191,18 +289,77 @@ function Stat({ label, value, hint, onSelect }: { label: string; value: number; 
   );
 }
 
-function Section({ id, title, description, items, pid, members, routine }: { id: string; title: string; description: string; items: PlanItem[]; pid: string; members: { id: string; email: string; name: string | null }[]; routine?: boolean }) {
+/** A summary row in the plan table. Clicking it opens that item's dedicated working page. */
+function Item({ item, tracked }: { item: PlanItem; tracked?: boolean }) {
+  const routine = item.section === "routine";
+  const done = item.status === "done";
+  const navigate = useNavigate();
   return (
-    <section id={`plan-${id}`} className="scroll-mt-6">
-      <h2 className="text-lg font-semibold flex items-center gap-1.5 mb-3">{title}<InfoHint width="w-72">{description}</InfoHint></h2>
-      <div className="space-y-2">{items.map((i) => <Item key={i.id} item={i} pid={pid} members={members} routine={routine} />)}</div>
-    </section>
+    <TR className={cn("cursor-pointer align-top", done && "opacity-60", item.due && routine && "bg-primary/5")} onClick={() => navigate(`/plan/${item.id}`)}>
+      <TD>
+        <div className="flex items-start gap-2">
+          <ChevronRight className="h-4 w-4 mt-0.5 shrink-0 text-muted-foreground" />
+          <CategoryIcon category={item.category} />
+          <div className="min-w-0"><div className="font-medium">{item.title}</div></div>
+        </div>
+      </TD>
+      <TD className="whitespace-nowrap text-xs text-muted-foreground">{GROUP_LABEL[item.section] ?? item.section}</TD>
+      <TD className="whitespace-nowrap text-xs text-muted-foreground">{CATEGORY_LABEL[item.category] ?? item.category}</TD>
+      <TD>
+        <div className="flex flex-wrap items-center gap-1">
+          {routine && <Badge variant={item.due ? "info" : "outline"}>{CADENCE_LABEL[item.cadence]}</Badge>}
+          {routine && item.completions?.length > 0 && <span className="text-xs text-muted-foreground">{item.completions.length}×</span>}
+          {item.resolved_at && <Badge variant="success">verified fixed</Badge>}
+          {item.assignee && <Badge variant="info" title={item.assignee.email}>{item.assignee.name || item.assignee.email}</Badge>}
+          {item.origin === "ai" && <Badge variant="info" title="Added by the AI analyst from your data">AI analyst</Badge>}
+          {tracked && <Badge variant="success" title="A tracked result exists for this item">measuring</Badge>}
+          {done && <Badge variant="muted">done</Badge>}
+        </div>
+      </TD>
+      <TD className="whitespace-nowrap text-right align-middle text-lg font-semibold tabular-nums text-primary">{Math.round(item.impact)}</TD>
+    </TR>
   );
 }
 
-function Item({ item, pid, members, routine }: { item: PlanItem; pid: string; members: { id: string; email: string; name: string | null }[]; routine?: boolean }) {
+/** The dedicated page for one plan item — its full "working": why, steps, evidence and the controls to do it. */
+export function PlanItemPage() {
+  const pid = useProjectId();
+  const { itemId } = useParams<{ itemId: string }>();
+  const { data, isLoading, error } = useQuery({ queryKey: ["plan", pid], queryFn: () => api.get<Plan>(`/projects/${pid}/plan`), enabled: !!pid });
+  if (isLoading) return <Loading />;
+  if (error) return <ErrorBox error={error} />;
+  const all = data ? [...data.setup, ...(data.business ?? []), ...data.fix, ...data.routine] : [];
+  const item = all.find((i) => i.id === itemId);
+  const back = <Link to="/plan" className="mb-4 inline-flex items-center gap-1 text-sm text-primary hover:underline"><ChevronLeft className="h-4 w-4" /> Back to plan</Link>;
+  if (!item) return <div>{back}<EmptyState title="Task not found">It may have been completed or rebuilt. <Link className="text-primary underline" to="/plan">Open the plan</Link>.</EmptyState></div>;
+  return (
+    <div>
+      {back}
+      <div className="mb-4 flex items-start gap-3">
+        <CategoryIcon category={item.category} />
+        <div className="min-w-0 flex-1">
+          <h1 className="text-xl font-semibold">{item.title}</h1>
+          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <Badge variant="muted">{GROUP_LABEL[item.section] ?? item.section}</Badge>
+            <Badge variant="muted">{CATEGORY_LABEL[item.category] ?? item.category}</Badge>
+            {item.affects?.length > 0 && <span className="flex items-center gap-1"><Target className="h-3 w-3" /> Improves {item.affects.map((a) => a.label).join(", ")}</span>}
+          </div>
+        </div>
+        <div className="shrink-0 text-right">
+          <div className="text-xs text-muted-foreground">impact</div>
+          <div className="text-2xl font-semibold tabular-nums text-primary">{Math.round(item.impact)}</div>
+        </div>
+      </div>
+      <ItemWorking item={item} pid={pid} members={data!.members} />
+    </div>
+  );
+}
+
+/** Everything you do for one item: the explanation, evidence, suggestions and action controls. Rendered on the
+ *  item's dedicated page. */
+function ItemWorking({ item, pid, members }: { item: PlanItem; pid: string; members: { id: string; email: string; name: string | null }[] }) {
+  const routine = item.section === "routine";
   const qc = useQueryClient();
-  const [open, setOpen] = useState(false);
   const [note, setNote] = useState("");
   const refresh = () => qc.invalidateQueries({ queryKey: ["plan", pid] });
   const complete = useMutation({ mutationFn: () => api.post<PlanItem>(`/projects/${pid}/plan/items/${item.id}/complete`, { note: note || null }), onSuccess: () => { setNote(""); refresh(); } });
@@ -219,78 +376,107 @@ function Item({ item, pid, members, routine }: { item: PlanItem; pid: string; me
   const done = item.status === "done";
   const sugg = item.suggestions || {};
   return (
-    <Card className={cn(done && "opacity-60", item.due && routine && "border-primary/40")}>
-      <CardContent className="pt-4">
-        <div className="flex gap-3">
-          {/* Status only — deliberately not a control, so a stray click cannot complete an item. */}
-          <span className="mt-0.5 shrink-0 text-muted-foreground" title={done ? "Done" : "Not done yet"}>
-            {done ? <SquareCheck className="h-5 w-5 text-emerald-600" /> : <Square className="h-5 w-5" />}
-          </span>
-          <CategoryIcon category={item.category} />
-          <div className="min-w-0 flex-1">
-            <button className="flex w-full items-start gap-1 text-left font-medium hover:underline" aria-expanded={open} onClick={() => setOpen(!open)}>
-              {open ? <ChevronDown className="h-4 w-4 mt-0.5 shrink-0 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 mt-0.5 shrink-0 text-muted-foreground" />}
-              <span className="min-w-0">{item.title}</span>
-            </button>
-            <div className="mt-1 flex flex-wrap items-center gap-2">
-              <Badge variant="muted">{CATEGORY_LABEL[item.category] ?? item.category}</Badge>
-              {routine && <Badge variant={item.due ? "info" : "outline"}>{CADENCE_LABEL[item.cadence]}</Badge>}
-              {routine && item.last_done_at && <span className="text-xs text-muted-foreground">last done <TimeAgo value={item.last_done_at} /></span>}
-              {routine && item.completions?.length > 0 && <span className="text-xs text-muted-foreground">· {item.completions.length}× done</span>}
-              {item.resolved_at && <Badge variant="success">verified fixed</Badge>}
-              {item.assignee && <Badge variant="info" title={item.assignee.email}>{item.assignee.name || item.assignee.email}</Badge>}
-              {item.origin === "ai" && <Badge variant="info" title="Added by the AI analyst from your data">AI analyst</Badge>}
-              {tracked && <Badge variant="success" title="A tracked result exists for this item">measuring</Badge>}
-              {item.affects?.length > 0 && (
-                <span className="flex items-center gap-1 text-xs text-muted-foreground" title="The brand scores this work moves on the Overview">
-                  <Target className="h-3 w-3 shrink-0" /> Improves {item.affects.map((a) => a.label).join(", ")}
-                </span>
-              )}
-            </div>
-            {open && (
-              <div className="mt-3 space-y-3 text-sm">
-                <p className="text-muted-foreground">{item.why}</p>
-                {item.steps?.length > 0 && <ol className="list-decimal pl-5 space-y-1">{item.steps.map((st, n) => <li key={n}><StepText text={st} /></li>)}</ol>}
-                <ScorePanel item={item} />
-                <Suggestions s={sugg} />
-                <div className="flex flex-wrap items-center gap-2 pt-1 text-xs">
-                  <span className="text-muted-foreground">Assigned to</span>
-                  <Select className="w-56 h-8" value={item.assignee_id ?? ""} onChange={(e) => assign.mutate(e.target.value || null)}>
-                    <option value="">nobody yet</option>
-                    {members.map((m) => <option key={m.id} value={m.id}>{m.name || m.email}</option>)}
-                  </Select>
-                  {members.length === 0 && <span className="text-muted-foreground">Add people under Team to assign work.</span>}
-                  <ErrorBox error={assign.error} />
-                </div>
-                {writable && <ContentPanel pid={pid} item={item} />}
-                <div className="flex flex-wrap items-end gap-2 pt-1">
-                  <Textarea rows={1} className="min-h-[36px] flex-1 min-w-[16rem]" placeholder={routine ? "What did you do? (link, title…)" : "Note (optional)"} value={note} onChange={(e) => setNote(e.target.value)} />
-                  {routine ? <Button size="sm" onClick={() => complete.mutate()} disabled={complete.isPending}>Mark done today</Button>
-                   : done ? <Button size="sm" variant="outline" onClick={() => uncomplete.mutate()} disabled={uncomplete.isPending}><Undo2 className="h-3.5 w-3.5" /> Undo</Button>
-                          : <Button size="sm" onClick={() => status.mutate("done")} disabled={status.isPending}>Mark done</Button>}
-                  {routine && item.completions?.length > 0 && <Button size="sm" variant="outline" onClick={() => uncomplete.mutate()} disabled={uncomplete.isPending} title="Remove the most recent entry and restore the previous due date"><Undo2 className="h-3.5 w-3.5" /> Undo last</Button>}
-                  {!routine && (tracked
-                    ? <Link to="/actions" className="flex items-center gap-1 text-xs text-primary hover:underline self-center">See the measured result <ArrowRight className="h-3 w-3" /></Link>
-                    : <Button size="sm" variant="outline" onClick={() => track.mutate()} disabled={track.isPending} title="Creates a tracked action so we can measure whether this worked">Track the result</Button>)}
-                  {!done && <Button size="sm" variant="ghost" onClick={() => status.mutate("skipped")}>Not relevant</Button>}
-                  <ErrorBox error={uncomplete.error} />
-                </div>
-                {routine && item.completions?.length > 0 && (
-                  <div className="text-xs text-muted-foreground"><b>History:</b> {item.completions.slice(-5).reverse().map((c, n) => <div key={n}><TimeAgo value={c.at} />{c.note ? ` — ${c.note}` : ""}</div>)}</div>
-                )}
-              </div>
+    <div className="space-y-4 text-sm">
+      <p className="text-muted-foreground">{item.why}</p>
+      {item.steps?.length > 0 && <ol className="list-decimal pl-5 space-y-1">{item.steps.map((st, n) => <li key={n}><StepText text={st} /></li>)}</ol>}
+      {item.source === "business:listings" && <DestinationsPanel pid={pid} />}
+      <ScorePanel item={item} />
+      <Suggestions s={sugg} />
+      <div className="flex flex-wrap items-center gap-2 pt-1 text-xs">
+        <span className="text-muted-foreground">Assigned to</span>
+        <Select className="w-56 h-8" value={item.assignee_id ?? ""} onChange={(e) => assign.mutate(e.target.value || null)}>
+          <option value="">nobody yet</option>
+          {members.map((m) => <option key={m.id} value={m.id}>{m.name || m.email}</option>)}
+        </Select>
+        {members.length === 0 && <span className="text-muted-foreground">Add people under Team to assign work.</span>}
+        <ErrorBox error={assign.error} />
+      </div>
+      {writable && <ContentPanel pid={pid} item={item} />}
+      <div className="flex flex-wrap items-end gap-2 pt-1">
+        <Textarea rows={1} className="min-h-[36px] flex-1 min-w-[16rem]" placeholder={routine ? "What did you do? (link, title…)" : "Note (optional)"} value={note} onChange={(e) => setNote(e.target.value)} />
+        {routine ? <Button size="sm" onClick={() => complete.mutate()} disabled={complete.isPending}>Mark done today</Button>
+         : done ? <Button size="sm" variant="outline" onClick={() => uncomplete.mutate()} disabled={uncomplete.isPending}><Undo2 className="h-3.5 w-3.5" /> Undo</Button>
+                : <Button size="sm" onClick={() => status.mutate("done")} disabled={status.isPending}>Mark done</Button>}
+        {routine && item.completions?.length > 0 && <Button size="sm" variant="outline" onClick={() => uncomplete.mutate()} disabled={uncomplete.isPending} title="Remove the most recent entry and restore the previous due date"><Undo2 className="h-3.5 w-3.5" /> Undo last</Button>}
+        {!routine && (tracked
+          ? <Link to="/results" className="flex items-center gap-1 text-xs text-primary hover:underline self-center">See the measured result <ArrowRight className="h-3 w-3" /></Link>
+          : <Button size="sm" variant="outline" onClick={() => track.mutate()} disabled={track.isPending} title="Creates a tracked action so we can measure whether this worked">Track the result</Button>)}
+        {!done && <Button size="sm" variant="ghost" onClick={() => status.mutate("skipped")}>Not relevant</Button>}
+        <ErrorBox error={uncomplete.error} />
+      </div>
+      {routine && item.completions?.length > 0 && (
+        <div className="text-xs text-muted-foreground"><b>History:</b> {item.completions.slice(-5).reverse().map((c, n) => <div key={n}><TimeAgo value={c.at} />{c.note ? ` — ${c.note}` : ""}</div>)}</div>
+      )}
+    </div>
+  );
+}
+
+interface Destination { slug: string; name: string; type: string; website_url: string | null; submission_url: string | null; logo_url: string | null; description: string | null; audience: string | null; pricing: string | null; pricing_note: string | null; link_type: string | null; domain_rating: number | null; monthly_traffic: number | null; categories: string[]; subreddit: any }
+interface Listings { available: boolean; total: number; filtered?: boolean; matched_tags?: string[]; destinations: Destination[]; reddit: { count: number; subreddits: Destination[] }; audiences: string[] }
+
+/** Recommended places to submit/claim a listing, synced from the awesome-submitlist dataset and matched to the
+ *  project by audience. Subreddits are collapsed into one expandable group. */
+function DestinationsPanel({ pid }: { pid: string }) {
+  const [audience, setAudience] = useState("");
+  const [q, setQ] = useState("");
+  const [showReddit, setShowReddit] = useState(false);
+  const params = new URLSearchParams();
+  if (audience) params.set("audience", audience);
+  if (q.trim()) params.set("q", q.trim());
+  const { data, isLoading } = useQuery({ queryKey: ["plan-listings", pid, audience, q], queryFn: () => api.get<Listings>(`/projects/${pid}/plan/listings?${params}`) });
+  const link = (d: Destination) => d.submission_url || d.website_url || undefined;
+  return (
+    <div className="rounded-md border bg-slate-50 p-3 dark:bg-slate-800/60">
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Where to submit {data?.filtered ? "" : "(matched to your audience)"}</div>
+        <Select className="h-8 w-56" value={audience} onChange={(e) => setAudience(e.target.value)}>
+          <option value="">{data?.filtered ? "All audiences" : "Best matches for you"}</option>
+          {(data?.audiences ?? []).map((a) => <option key={a} value={a}>{a}</option>)}
+        </Select>
+        <SearchBox className="w-[18rem]" placeholder="Search places…" value={q} onSearch={setQ} />
+      </div>
+      {isLoading ? <Loading /> : !data?.available ? (
+        <p className="text-xs text-muted-foreground">The submission list has not been synced yet. It refreshes automatically; check back shortly.</p>
+      ) : (
+        <Table containerClassName="rounded-md border bg-white dark:bg-slate-900">
+          <THead><TR><TH>Place</TH><TH>Type</TH><TH>Audience</TH><TH className="text-right">DR</TH><TH>Pricing</TH><TH /></TR></THead>
+          <TBody>
+            {data.destinations.map((d) => (
+              <TR key={d.slug}>
+                <TD><div className="font-medium">{d.name}</div>{d.description && <div className="max-w-md truncate text-xs text-muted-foreground" title={d.description}>{d.description}</div>}</TD>
+                <TD className="whitespace-nowrap text-xs text-muted-foreground">{d.type}</TD>
+                <TD className="max-w-xs text-xs text-muted-foreground"><span className="line-clamp-2" title={d.audience ?? ""}>{d.audience ?? "—"}</span></TD>
+                <TD className="text-right tabular-nums text-xs">{d.domain_rating ?? "—"}</TD>
+                <TD className="whitespace-nowrap text-xs text-muted-foreground">{d.pricing ?? "—"}</TD>
+                <TD className="text-right">{link(d) && <a className="inline-flex items-center gap-1 text-xs text-primary hover:underline" href={link(d)} target="_blank" rel="noreferrer">Submit <ExternalLink className="h-3 w-3" /></a>}</TD>
+              </TR>
+            ))}
+            {data.reddit.count > 0 && (
+              <Fragment>
+                <TR className="cursor-pointer" onClick={() => setShowReddit((v) => !v)}>
+                  <TD colSpan={6}>
+                    <div className="flex items-center gap-1.5 font-medium">
+                      {showReddit ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+                      Reddit communities <span className="text-muted-foreground">({data.reddit.count})</span>
+                    </div>
+                  </TD>
+                </TR>
+                {showReddit && data.reddit.subreddits.map((d) => (
+                  <TR key={d.slug} className="bg-slate-50/60 dark:bg-slate-800/40">
+                    <TD className="pl-9"><div className="font-medium">{d.name}</div>{d.description && <div className="max-w-md truncate text-xs text-muted-foreground" title={d.description}>{d.description}</div>}</TD>
+                    <TD className="text-xs text-muted-foreground">subreddit</TD>
+                    <TD className="max-w-xs text-xs text-muted-foreground"><span className="line-clamp-2" title={d.audience ?? ""}>{d.audience ?? "—"}</span></TD>
+                    <TD className="text-right tabular-nums text-xs">{d.domain_rating ?? "—"}</TD>
+                    <TD className="text-xs text-muted-foreground">—</TD>
+                    <TD className="text-right">{link(d) && <a className="inline-flex items-center gap-1 text-xs text-primary hover:underline" href={link(d)} target="_blank" rel="noreferrer">Open <ExternalLink className="h-3 w-3" /></a>}</TD>
+                  </TR>
+                ))}
+              </Fragment>
             )}
-          </div>
-          <div className="shrink-0 text-right">
-            <div className="flex items-center justify-end gap-1 text-xs text-muted-foreground">
-              impact
-              <InfoHint width="w-72">How much this should move the needle, scored 0–100 from the evidence behind it. It is one of three inputs to the order of this list: priority = impact × confidence × effort factor. Open the item to see the full calculation and the evidence.</InfoHint>
-            </div>
-            <div className="text-lg font-semibold tabular-nums text-primary">{Math.round(item.impact)}</div>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
+          </TBody>
+        </Table>
+      )}
+    </div>
   );
 }
 

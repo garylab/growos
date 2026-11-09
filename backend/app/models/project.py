@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Boolean, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -21,6 +22,12 @@ class Project(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     default_language: Mapped[str] = mapped_column(String(10), default="en", nullable=False)
     default_country: Mapped[str] = mapped_column(String(5), default="US", nullable=False)
     settings: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
+    # Submission-target matching: category tags classified from the dataset vocabulary and a cached embedding
+    # of the project profile. `profile_hash` lets us re-embed only when the brand/description/keywords change.
+    category_tags: Mapped[list[str]] = mapped_column(ARRAY(String), default=list, nullable=False)
+    profile_embedding: Mapped[list[float] | None] = mapped_column(ARRAY(Float))
+    profile_hash: Mapped[str | None] = mapped_column(String(64))
+    profile_embedded_at: Mapped['datetime | None'] = mapped_column(DateTime(timezone=True))
 
     domains: Mapped[list["Domain"]] = relationship(back_populates="project", cascade="all, delete-orphan")
     competitors: Mapped[list["Competitor"]] = relationship(back_populates="project", cascade="all, delete-orphan")

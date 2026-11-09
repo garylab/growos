@@ -25,6 +25,8 @@ const ACTION_COLUMNS: CsvColumn<Action>[] = [
   { key: "completed", label: "Completed", value: (r) => r.completed_at },
 ];
 
+/** The "Results" page (route /results). It is backed by the ActionRecord model and the /actions API — the
+ *  component keeps its ActionsPage name for that reason, but everything the user sees reads "Results". */
 export function ActionsPage() {
   const pid = useProjectId();
   const qc = useQueryClient();

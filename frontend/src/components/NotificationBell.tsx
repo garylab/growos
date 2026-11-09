@@ -29,16 +29,18 @@ export function NotificationBell({ placement = "down", align = "left" }: { place
   const readOne = useMutation({ mutationFn: (id: string) => api.post(`/notifications/${id}/read`), onSuccess: () => qc.invalidateQueries({ queryKey: ["notifications"] }) });
   useEffect(() => {
     if (!open) return;
-    const closeOnFocusOutside = (event: FocusEvent) => {
+    const closeOnOutside = (event: PointerEvent | FocusEvent) => {
       if (!root.current?.contains(event.target as Node)) setOpen(false);
     };
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") setOpen(false);
     };
-    document.addEventListener("focusin", closeOnFocusOutside);
+    document.addEventListener("pointerdown", closeOnOutside);
+    document.addEventListener("focusin", closeOnOutside);
     document.addEventListener("keydown", closeOnEscape);
     return () => {
-      document.removeEventListener("focusin", closeOnFocusOutside);
+      document.removeEventListener("pointerdown", closeOnOutside);
+      document.removeEventListener("focusin", closeOnOutside);
       document.removeEventListener("keydown", closeOnEscape);
     };
   }, [open]);
@@ -51,9 +53,7 @@ export function NotificationBell({ placement = "down", align = "left" }: { place
         {unread > 0 && <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-semibold text-white">{unread > 9 ? "9+" : unread}</span>}
       </button>
       {open && (
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div role="dialog" aria-label="Notifications" className={cn("absolute z-50 w-80 max-w-[calc(100vw-2rem)] max-h-[70vh] overflow-auto rounded-lg border bg-white dark:bg-slate-900 shadow-lg",
+        <div role="dialog" aria-label="Notifications" className={cn("absolute z-50 w-80 max-w-[calc(100vw-2rem)] max-h-[70vh] overflow-auto rounded-lg border bg-white dark:bg-slate-900 shadow-lg",
             align === "right" ? "right-0" : "left-0",
             placement === "up" ? "bottom-full mb-2" : "top-full mt-2")}>
             <div className="flex items-center justify-between border-b px-3 py-2">
@@ -78,7 +78,6 @@ export function NotificationBell({ placement = "down", align = "left" }: { place
                 : <div key={n.id}>{inner}</div>;
             })}
           </div>
-        </>
       )}
     </div>
   );

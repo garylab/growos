@@ -8,7 +8,7 @@ from typing import Any
 
 from app.models import AuditFinding, CrawlRun, Domain, PageSnapshot
 from app.services.ai_crawlers import fetch_and_analyze
-from app.services.page_signals import fetch_signals
+from app.services.page_signals import fetch_signals, serves_brotli
 from app.services.providers import get_adapter, record_usage
 from app.services.render import RENDER_PROVIDER, get_renderer
 from app.tasks.context import TaskContext
@@ -123,6 +123,10 @@ def _collect_signals(ctx: TaskContext, domain: Domain, run_id: uuid.UUID) -> int
         sig = fetch_signals(p.url, renderer if rendered < budget else None)
         if sig.get("rendered"):
             rendered += 1
+        # Brotli is a server/CDN-wide property, so one check on the home page settles it for the whole domain and
+        # lets the plan ignore SiteOne's Brotli false positive (its probe never advertises Accept-Encoding: br).
+        if p.path == "/" and sig.get("checked"):
+            sig["serves_brotli"] = serves_brotli(p.url)
         p.signals = sig
         if sig.get("checked"):
             checked += 1

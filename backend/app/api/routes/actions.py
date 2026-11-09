@@ -6,7 +6,7 @@ import uuid
 from datetime import UTC, date, datetime
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
-from sqlalchemy import desc, select
+from sqlalchemy import desc, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -17,7 +17,33 @@ from app.models.growth import ACTION_STATUSES
 from app.schemas.growth import ActionIn, ActionOut, ActionUpdate, OutcomeOut
 from app.services.outcomes import measure_action
 
+# This router is the "Results" feature in the UI (menu item "Results", route /results). The model is named
+# ActionRecord and the API path is /actions for historical reasons; the two names refer to the same thing.
 router = APIRouter(prefix="/projects/{project_id}", tags=["actions"])
+
+
+def _plan_items_for(db: Session, project_id, actions: list[ActionRecord]) -> dict:
+    """Resolve each action's current plan item, by id and — if the id was orphaned by a plan regeneration — by the
+    stored plan_item_key. Returns {action_id: PlanItem}. This keeps a tracked result pointing at the live plan item
+    even after the playbook rebuilds the plan, and lets the result read its target pages/keywords from one source."""
+    ids = {a.plan_item_id for a in actions if a.plan_item_id}
+    keys = {a.plan_item_key for a in actions if a.plan_item_key}
+    if not ids and not keys:
+        return {}
+    conds = []
+    if ids:
+        conds.append(PlanItem.id.in_(ids))
+    if keys:
+        conds.append(PlanItem.key.in_(keys))
+    items = db.scalars(select(PlanItem).where(PlanItem.project_id == project_id, or_(*conds))).all()
+    by_id = {i.id: i for i in items}
+    by_key = {i.key: i for i in items}
+    out = {}
+    for a in actions:
+        pi = (by_id.get(a.plan_item_id) if a.plan_item_id else None) or (by_key.get(a.plan_item_key) if a.plan_item_key else None)
+        if pi is not None:
+            out[a.id] = pi
+    return out
 
 
 @router.get("/actions", response_model=list[ActionOut])
@@ -25,15 +51,36 @@ def list_actions(project: Project = Depends(get_project), status: str | None = N
     stmt = select(ActionRecord).where(ActionRecord.project_id == project.id).order_by(desc(ActionRecord.created_at))
     if status:
         stmt = stmt.where(ActionRecord.status == status)
-    return db.scalars(stmt).all()
+    actions = list(db.scalars(stmt).all())
+    plan = _plan_items_for(db, project.id, actions)
+    # A linked result reads its target pages/keywords from the live plan item (single source of truth), so they
+    # cannot drift from the plan; the stored snapshot is only the fallback for manual or orphaned results.
+    out = []
+    for a in actions:
+        view = ActionOut.model_validate(a)
+        pi = plan.get(a.id)
+        if pi is not None:
+            view.plan_item_id = pi.id
+            view.target_urls = pi.target_urls
+            view.target_keywords = pi.target_keywords
+        out.append(view)
+    return out
 
 
 @router.get("/actions/linked")
 def linked_plan_items(project: Project = Depends(get_project), db: Session = Depends(get_db)):
-    """Which checklist items already have a tracked result, so the plan can show it."""
-    rows = db.execute(select(ActionRecord.plan_item_id, ActionRecord.id, ActionRecord.status)
-                      .where(ActionRecord.project_id == project.id, ActionRecord.plan_item_id.isnot(None))).all()
-    return {str(pid): {"action_id": str(aid), "status": st} for pid, aid, st in rows}
+    """Which checklist items already have a tracked result, so the plan can show it. Resolves by plan_item_id, and
+    by plan_item_key when a regeneration orphaned the id, so the 'measuring' badge survives a plan rebuild."""
+    actions = list(db.scalars(select(ActionRecord).where(
+        ActionRecord.project_id == project.id,
+        or_(ActionRecord.plan_item_id.isnot(None), ActionRecord.plan_item_key.isnot(None)))).all())
+    plan = _plan_items_for(db, project.id, actions)
+    out = {}
+    for a in actions:
+        pi = plan.get(a.id)
+        if pi is not None:
+            out[str(pi.id)] = {"action_id": str(a.id), "status": a.status}
+    return out
 
 
 @router.post("/actions", response_model=ActionOut, status_code=201)
@@ -41,6 +88,10 @@ def create_action(body: ActionIn, project: Project = Depends(get_project), db: S
     if body.status not in ACTION_STATUSES:
         raise HTTPException(400, f"status must be one of {ACTION_STATUSES}")
     a = ActionRecord(project_id=project.id, **body.model_dump())
+    if a.plan_item_id:  # record the stable key so the link survives plan regeneration
+        pi = db.get(PlanItem, a.plan_item_id)
+        if pi is not None and pi.project_id == project.id:
+            a.plan_item_key = pi.key
     if a.status == "in_progress":
         a.started_at = datetime.now(UTC)
     db.add(a)
@@ -83,6 +134,10 @@ def measure(action_id: uuid.UUID, window_days: int = Query(28, ge=7, le=90), pro
     a = db.get(ActionRecord, action_id)
     if a is None or a.project_id != project.id:
         raise HTTPException(404, "Action not found")
+    # Measure against the live plan item's targets when linked, and refresh the stored snapshot so it stays current.
+    pi = _plan_items_for(db, project.id, [a]).get(a.id)
+    if pi is not None:
+        a.target_urls, a.target_keywords = pi.target_urls, pi.target_keywords
     return measure_action(db, a, window_days)
 
 

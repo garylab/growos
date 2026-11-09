@@ -138,6 +138,31 @@ def weekly_digests() -> None:
         log.info("digest.run", **send_weekly_digests(db))
 
 
+def sync_listings() -> None:
+    """Mirror the awesome-submitlist dataset into submission_targets. The service no-ops if synced recently."""
+    Session = get_sessionmaker()
+    with Session() as db:
+        from app.services.destinations import sync_destinations
+        try:
+            log.info("listings.sync", **sync_destinations(db))
+        except Exception as exc:  # noqa: BLE001 — a failed external fetch must not take the worker down
+            log.warning("listings.sync_failed", error=str(exc))
+
+
+def backfill_target_embeddings() -> None:
+    """Embed submission targets that still lack an embedding, a little each run so a rate-limited free tier catches
+    up over time. No-op once everything is embedded or when no embedding key is configured."""
+    Session = get_sessionmaker()
+    with Session() as db:
+        from app.services.destinations import backfill_embeddings
+        try:
+            res = backfill_embeddings(db)
+            if res["embedded"]:
+                log.info("listings.embed_backfill", **res)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("listings.embed_backfill_failed", error=str(exc))
+
+
 def reap_stale_jobs() -> None:
     Session = get_sessionmaker()
     with Session() as db:
@@ -155,6 +180,13 @@ def main() -> None:
     scheduler.add_job(flush_emails, "interval", seconds=60, id="emails", max_instances=1)
     # Weekly digest: Mondays 08:00 UTC. The dedupe key makes a missed run catch up on the next tick without duplicating.
     scheduler.add_job(weekly_digests, "cron", day_of_week="mon", hour=8, id="digest", max_instances=1)
+    # Listing destinations: mirror the GitHub dataset monthly (1st, 04:00 UTC). Only the default-queue worker runs
+    # it so the crawler image does not duplicate the fetch; an initial sync runs at startup when the table is empty.
+    if not (settings.worker_queue or "").strip() or settings.worker_queue == "default":
+        scheduler.add_job(sync_listings, "cron", day=1, hour=4, id="listings", max_instances=1)
+        # Embeddings fill in over time because the free-tier model is daily-capped; retry the backfill hourly.
+        scheduler.add_job(backfill_target_embeddings, "interval", hours=1, id="embed_backfill", max_instances=1)
+        threading.Thread(target=sync_listings, daemon=True, name="listings-initial").start()
     scheduler.start()
     threads = [threading.Thread(target=worker_loop, args=(i,), daemon=True, name=f"worker-{i}") for i in range(settings.worker_concurrency)]
     for t in threads:

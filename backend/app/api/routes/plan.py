@@ -12,6 +12,7 @@ from app.api.deps import Principal, get_principal, get_project
 from app.core.db import get_db
 from app.intelligence.playbook import mark_complete, plan_summary, undo_complete
 from app.intelligence.scorecard import INDEX_LEVERS
+from app.models.growth import plan_status_to_action
 from app.models import ActionRecord, PlanItem, Project, ProjectMember, User
 from app.models.plan import PLAN_STATUSES
 from app.queue import get_queue
@@ -88,6 +89,15 @@ def get_plan(project: Project = Depends(get_project), assignee_id: uuid.UUID | N
             "routine": sorted((_out(i, people) for i in items if i.section == "routine"), key=lambda x: (cadence_order.get(x["cadence"], 9), -x["priority"]))}
 
 
+@router.get("/listings")
+def plan_listings(project: Project = Depends(get_project), audience: str | None = None, q: str | None = None,
+                  type: str | None = None, db: Session = Depends(get_db)):
+    """Recommended places to submit/claim a listing, matched to the project by audience. Subreddits are collapsed
+    into a single expandable group. Powers the dedicated page for the "Claim your profile…" plan item."""
+    from app.services.destinations import recommend_for_project
+    return recommend_for_project(db, project, audience=audience, q=q, want_type=type)
+
+
 @router.post("/items/{item_id}/track", status_code=201)
 def track_result(item_id: uuid.UUID, body: TrackIn, project: Project = Depends(get_project),
                  db: Session = Depends(get_db), principal: Principal = Depends(get_principal)):
@@ -100,8 +110,16 @@ def track_result(item_id: uuid.UUID, body: TrackIn, project: Project = Depends(g
     existing = db.scalar(select(ActionRecord).where(ActionRecord.plan_item_id == i.id))
     if existing:
         return {"id": str(existing.id), "title": existing.title, "status": existing.status, "already_tracked": True}
-    action = ActionRecord(project_id=project.id, plan_item_id=i.id, title=(body.title or i.title)[:300],
-                          description=i.why, status="in_progress", started_at=datetime.now(UTC),
+    # Seed the action status from the plan item via the single shared mapping; tracking a not-yet-started item
+    # means you are working on it now, so a "planned" result starts in progress instead.
+    status = plan_status_to_action(i.status)
+    if status == "planned":
+        status = "in_progress"
+    now = datetime.now(UTC)
+    action = ActionRecord(project_id=project.id, plan_item_id=i.id, plan_item_key=i.key, title=(body.title or i.title)[:300],
+                          description=i.why, status=status,
+                          started_at=now if status in ("in_progress", "done") else None,
+                          completed_at=now if status == "done" else None,
                           owner=(principal.user.email if principal.user else None),
                           target_urls=i.target_urls or [], target_keywords=i.target_keywords or [], notes=body.note)
     db.add(action)

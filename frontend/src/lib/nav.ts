@@ -51,7 +51,7 @@ const competitors: NavTab[] = [
 export const NAV: NavItem[] = [
   { to: "/", label: "Overview", icon: LayoutDashboard, end: true },
   { to: "/plan", label: "Growth Plan", icon: ClipboardCheck },
-  { to: "/actions", label: "Results", icon: ListChecks },
+  { to: "/results", label: "Results", icon: ListChecks },
   { to: "/geo", label: "GEO AI Visibility", icon: Bot, tabs: geo, dividerBefore: true },
   { to: "/seo", label: "SEO Performance", icon: BarChart3, tabs: seo },
   { to: "/brand", label: "Brand Monitoring", icon: Megaphone, tabs: brand },
