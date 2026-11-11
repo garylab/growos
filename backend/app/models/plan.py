@@ -18,9 +18,13 @@ PLAN_STATUSES = ("todo", "in_progress", "done", "skipped")
 class PlanItem(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """One user-facing checklist item of the Growth Plan (one-time fix, setup step or recurring routine)."""
     __tablename__ = "plan_items"
-    __table_args__ = (Index("ix_plan_items_key", "project_id", "key", unique=True),)
+    __table_args__ = (Index("ix_plan_items_key", "project_id", "key", unique=True),
+                      Index("uq_plan_items_seq", "project_id", "seq", unique=True))
 
     project_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    # Stable per-project display number ("NO"), assigned once when the item is first created and never changed on
+    # a rebuild — so a task keeps the same number for the life of the project even as the plan is re-synced.
+    seq: Mapped[int | None] = mapped_column(Integer)
     key: Mapped[str] = mapped_column(String(300), nullable=False)
     section: Mapped[str] = mapped_column(String(20), nullable=False)       # setup | business | fix | routine
     cadence: Mapped[str] = mapped_column(String(20), default="once", nullable=False)

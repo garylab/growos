@@ -60,7 +60,7 @@ def _out(i: PlanItem, people: dict[uuid.UUID, dict] | None = None) -> dict:
     return {
         "assignee_id": str(i.assignee_id) if i.assignee_id else None, "assignee": assignee, "due_date": i.due_date,
         "confidence": i.confidence, "score_breakdown": i.score_breakdown, "origin": i.origin,
-        "target_urls": i.target_urls, "target_keywords": i.target_keywords, "history": i.history, "affects": _affects(i.category),"id": str(i.id), "key": i.key, "section": i.section, "cadence": i.cadence, "category": i.category, "title": i.title, "why": i.why,
+        "target_urls": i.target_urls, "target_keywords": i.target_keywords, "history": i.history, "affects": _affects(i.category),"id": str(i.id), "seq": i.seq, "key": i.key, "section": i.section, "cadence": i.cadence, "category": i.category, "title": i.title, "why": i.why,
             "steps": i.steps, "suggestions": i.suggestions, "evidence": i.evidence, "impact": i.impact, "effort": i.effort, "priority": i.priority,
             "status": i.status, "completions": i.completions, "next_due_at": i.next_due_at, "last_done_at": i.last_done_at, "resolved_at": i.resolved_at,
             "source": i.source, "note": i.note, "updated_at": i.updated_at,

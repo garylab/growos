@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type Action, type Outcome } from "@/lib/api";
-import { useEnqueue } from "@/hooks/useJobs";
 import { useDomains, useProjectId } from "@/hooks/useProject";
 import { EmptyState, ErrorBox, Loading, PageHeader } from "@/components/ui/misc";
 import { Pagination, usePaged } from "@/components/ui/pagination";
@@ -107,7 +106,6 @@ function AnalyticsImport({ pid }: { pid: string }) {
   const [file, setFile] = useState<File | null>(null);
   const [prop, setProp] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
-  const enqueue = useEnqueue();
   const { data } = useQuery({ queryKey: ["analytics", domain?.id], queryFn: () => api.get<Analytics>(`/projects/${pid}/domains/${domain!.id}/analytics`), enabled: !!domain, refetchInterval: 20000 });
   const landingPages = (data?.landing_pages ?? []).filter((row) => !filter || row.landing_page.toLowerCase().includes(filter.toLowerCase()));
   const pagedPages = usePaged(landingPages, 10);
@@ -122,10 +120,8 @@ function AnalyticsImport({ pid }: { pid: string }) {
         <div className="flex gap-2 items-end">
           <Field label="GA4 property ID"><Input className="w-44" placeholder="123456789" value={propValue} onChange={(e) => setProp(e.target.value)} /></Field>
           <Button size="sm" variant="outline" onClick={() => saveProp.mutate()} disabled={saveProp.isPending || prop === null}>Save</Button>
-          <Button size="sm" onClick={() => enqueue.mutate({ task_type: "sync_analytics", params: { domain_id: domain.id, days: 90 } })} disabled={enqueue.isPending || !domain.ga4_property}>Re-run</Button>
         </div>
-        <ErrorBox error={saveProp.error || enqueue.error} />
-        {enqueue.isSuccess && <p className="text-xs text-muted-foreground">Sync job queued…</p>}
+        <ErrorBox error={saveProp.error} />
         {data?.available ? (
           <>
             <div className="text-xs text-muted-foreground">Sources: {data.providers?.join(", ")} · data {data.data_range?.start} → {data.data_range?.end} · last sync <TimeAgo value={data.last_sync} /></div>

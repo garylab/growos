@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { Plus } from "lucide-react";
-import { api, type Competitor, type Job, type Prompt } from "@/lib/api";
+import { api, type Competitor, type Prompt } from "@/lib/api";
 import { useCompetitors, useProject, useProjectId } from "@/hooks/useProject";
 import { useActiveTab } from "@/hooks/useTabRoute";
 import { GEO_TABS } from "@/lib/nav";
@@ -92,9 +92,7 @@ const GEO_TAB_META: Record<string, { title: string; info: string }> = {
 
 export function AIVisibilityPage() {
   const pid = useProjectId();
-  const qc = useQueryClient();
   const { data: prompts, isLoading } = useQuery({ queryKey: ["prompts", pid], queryFn: () => api.get<Prompt[]>(`/projects/${pid}/geo/prompts`) });
-  const run = useMutation({ mutationFn: (body: { samples?: number }) => api.post<Job>(`/projects/${pid}/geo/run`, body), onSuccess: () => qc.invalidateQueries({ queryKey: ["jobs"] }) });
   const [adding, setAdding] = useState(false);
   const [trafficDays, setTrafficDays] = useState(90);
   const tab = useActiveTab(GEO_TABS, "visibility");
@@ -107,11 +105,8 @@ export function AIVisibilityPage() {
         actions={<>
           {tab === "ai-traffic" && <Select className="w-36" value={trafficDays} onChange={(e) => setTrafficDays(Number(e.target.value))}>{[28, 90, 180, 365].map((n) => <option key={n} value={n}>Last {n} days</option>)}</Select>}
           {tab === "prompts" && <Button variant="outline" onClick={() => setAdding(true)}>Add prompts</Button>}
-          <Button onClick={() => run.mutate({})} disabled={run.isPending || !prompts?.length}>Re-run</Button>
         </>}
       />
-      <ErrorBox error={run.error} />
-      {run.data && <div className="mb-4 text-sm text-muted-foreground">Job queued ({run.data.id.slice(0, 8)})…</div>}
       {tab === "visibility" && <VisibilityTab pid={pid} />}
       {tab === "ai-traffic" && <AITrafficTab pid={pid} days={trafficDays} />}
       {tab === "answers" && <AnswersTab pid={pid} prompts={prompts ?? []} />}

@@ -46,6 +46,20 @@ def enqueue_job(body: EnqueueIn, project: Project = Depends(get_project), db: Se
     return job
 
 
+@router.get("/projects/{project_id}/jobs/catalog")
+def jobs_catalog(project: Project = Depends(get_project), db: Session = Depends(get_db)):
+    """Jobs the user can run from the Overview dialog, tagged free/paid and filtered to what is configured."""
+    from app.services.job_catalog import build_catalog
+    return build_catalog(db, project)
+
+
+@router.post("/projects/{project_id}/jobs/run-selected", status_code=202)
+def run_selected(body: dict, project: Project = Depends(get_project), db: Session = Depends(get_db)):
+    from app.services.job_catalog import enqueue_selected
+    enqueued = enqueue_selected(db, project, list(body.get("task_types") or []))
+    return {"enqueued": enqueued, "count": len(enqueued)}
+
+
 @router.get("/jobs/{job_id}", response_model=JobOut)
 def get_job(job_id: uuid.UUID, db: Session = Depends(get_db)):
     job = db.get(CollectionJob, job_id)

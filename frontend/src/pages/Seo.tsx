@@ -7,7 +7,6 @@ import { api, type Domain } from "@/lib/api";
 import { useDomains, useProjectId } from "@/hooks/useProject";
 import { useActiveTab } from "@/hooks/useTabRoute";
 import { SEO_TABS } from "@/lib/nav";
-import { useEnqueue } from "@/hooks/useJobs";
 import { EmptyState, ErrorBox, InfoHint, Loading, Metric, PageHeader } from "@/components/ui/misc";
 import { Pagination, usePaged } from "@/components/ui/pagination";
 import { CsvExportButton, type CsvColumn } from "@/components/ui/csv-export";
@@ -53,9 +52,7 @@ export function SeoPage() {
   const [domainId, setDomainId] = useState<string>("");
   const [searchDays, setSearchDays] = useState(28);
   const domain = primaries.find((d) => d.id === domainId) ?? primaries[0];
-  const enqueue = useEnqueue();
   const tab = useActiveTab(SEO_TABS, "audit-and-pages");
-  const { view } = useParams<{ view?: string }>();
   // Rankings engine lives here so its picker can sit in the page header; the query is shared (same key) with
   // RankingsTab, so react-query runs it once. Scoped to the rankings tab.
   const [rankEngine, setRankEngine] = useState("");
@@ -67,22 +64,6 @@ export function SeoPage() {
   });
   if (!domains) return <Loading />;
   if (!domain) return <EmptyState title="No website yet">Add your website under <Link className="text-primary underline" to="/settings">Settings</Link>.</EmptyState>;
-  const rerun = () => {
-    if (tab === "page-performance") {
-      enqueue.mutate({ task_type: "measure_performance", params: { domain_id: domain.id } });
-    } else if (tab === "search-performance") {
-      enqueue.mutate({
-        task_type: view === "bing" ? "sync_bing_webmaster" : "sync_search_console",
-        params: view === "bing" ? { domain_id: domain.id } : { domain_id: domain.id, days: 90 },
-      });
-    } else if (tab === "backlinks") {
-      enqueue.mutate({ task_type: "sync_backlinks", params: { domain_id: domain.id } });
-    } else if (tab === "rankings") {
-      enqueue.mutate({ task_type: "sync_rankings", params: {} });
-    } else {
-      enqueue.mutate({ task_type: "crawl_domain", params: { domain_id: domain.id } });
-    }
-  };
   return (
     <div>
       <PageHeader
@@ -98,11 +79,9 @@ export function SeoPage() {
                 {rankings.data!.providers!.map((k) => <option key={k} value={k}>{k}</option>)}
               </Select>
             )}
-            {tab !== "keywords" && <Button onClick={rerun} disabled={enqueue.isPending}>Re-run</Button>}
           </>
         }
       />
-      <ErrorBox error={enqueue.error} />
       {tab === "audit-and-pages" && <AuditTab pid={pid} domain={domain} />}
       {tab === "search-performance" && <SearchTab pid={pid} domain={domain} days={searchDays} />}
       {tab === "page-performance" && <PerformanceTab pid={pid} domain={domain} />}
@@ -216,7 +195,7 @@ function AuditTab({ pid, domain }: { pid: string; domain: Domain }) {
     };
   }, [issueTypesOpen]);
   if (isLoading) return <Loading />;
-  if (!run) return <EmptyState title="No completed crawl yet">Click “Re-run” to create the first audit.</EmptyState>;
+  if (!run) return <EmptyState title="No completed crawl yet">Use <b>Run jobs</b> on the Overview page to create the first audit.</EmptyState>;
   const cats = run.quality_scores.categories ?? [];
   const byCode: Record<string, { count: number; severity: string }> = {};
   for (const f of allFindings ?? []) {
@@ -390,7 +369,7 @@ function SearchTab({ pid, domain, days }: { pid: string; domain: Domain; days: n
   if (!data?.available) {
     return (
       <div className="space-y-4">
-        <EmptyState title="Search Console data not available">{data?.reason}. <Link className="text-primary underline" to="/integrations">Connect Search Console</Link>, set the property below, then click “Re-run”.</EmptyState>
+        <EmptyState title="Search Console data not available">{data?.reason}. <Link className="text-primary underline" to="/integrations">Connect Search Console</Link>, set the property below, then use <b>Run jobs</b> on the Overview page.</EmptyState>
         <Card><CardContent className="pt-5 flex gap-2 items-end"><div className="flex-1"><div className="text-xs text-muted-foreground mb-1">Search Console property for {domain.hostname}</div><Input value={prop} onChange={(e) => setProp(e.target.value)} placeholder="sc-domain:example.com" /></div><Button onClick={() => save.mutate()} disabled={save.isPending}>Save</Button></CardContent></Card>
         <BingPanel pid={pid} domain={domain} days={days} />
       </div>
@@ -459,7 +438,7 @@ function BingPanel({ pid, domain, days, filter = "" }: { pid: string; domain: Do
       </div>
         {!data.available ? (
           <div className="space-y-3">
-            <p className="text-sm text-muted-foreground">{data.reason}. <Link className="text-primary underline" to="/integrations">Add the Bing Webmaster Tools API key</Link>, set the verified site URL below, then click “Re-run”.</p>
+            <p className="text-sm text-muted-foreground">{data.reason}. <Link className="text-primary underline" to="/integrations">Add the Bing Webmaster Tools API key</Link>, set the verified site URL below, then use <b>Run jobs</b> on the Overview page.</p>
             <div className="flex gap-2 items-end">
               <div className="flex-1"><div className="text-xs text-muted-foreground mb-1">Bing site URL for {domain.hostname} (exactly as verified in Bing Webmaster Tools)</div><Input value={site} onChange={(e) => setSite(e.target.value)} placeholder="https://example.com" /></div>
               <Button onClick={() => save.mutate()} disabled={save.isPending}>Save</Button>
@@ -554,7 +533,7 @@ function PerformanceTab({ pid, domain }: { pid: string; domain: Domain }) {
     { key: "measured", label: "Measured", value: (row) => row.observed_at },
   ];
   if (isLoading) return <Loading />;
-  if (!data?.length) return <EmptyState title="No performance measurements yet">Click “Re-run” to create the first measurement.</EmptyState>;
+  if (!data?.length) return <EmptyState title="No performance measurements yet">Use <b>Run jobs</b> on the Overview page to create the first measurement.</EmptyState>;
   return (
     <div>
     <div className="mb-3 flex flex-wrap gap-2">
@@ -607,7 +586,7 @@ function BacklinksTab({ pid, domain }: { pid: string; domain: Domain }) {
     return (
       <EmptyState title="No backlink data yet">
         {data?.connected_provider
-          ? <>Connected to <b>{data.connected_provider}</b>. Click “Re-run” to fetch referring domains.</>
+          ? <>Connected to <b>{data.connected_provider}</b>. Use <b>Run jobs</b> on the Overview page to fetch referring domains.</>
           : <>Connect a provider under <Link className="text-primary underline" to="/integrations">Integrations → Backlinks</Link> (DataForSEO, Ahrefs, Semrush, or any JSON endpoint), then sync.</>}
       </EmptyState>
     );
@@ -697,7 +676,7 @@ function BacklinkLinks({ pid, domain }: { pid: string; domain: Domain }) {
   if (isLoading) return <Loading />;
   if (!data?.available) {
     return <EmptyState title="No individual links stored yet">
-      Referring domains are a cheaper call than the full link list. Click “Re-run” — if your provider or
+      Referring domains are a cheaper call than the full link list. Use <b>Run jobs</b> on Overview — if your provider or
       plan does not return individual links, the job logs say so and the domain view keeps working.
     </EmptyState>;
   }

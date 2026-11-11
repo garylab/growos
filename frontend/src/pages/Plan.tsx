@@ -1,7 +1,7 @@
 import { Fragment, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ArrowRight, Bot, Briefcase, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ChevronsUpDown, Clock, Download, ExternalLink, FileText, Globe, Link2, Megaphone, MessagesSquare, Minus, Plug, RefreshCw, Target, Undo2, Users, Video } from "lucide-react";
+import { ArrowRight, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ChevronsUpDown, Clock, Download, ExternalLink, Maximize2, Minus, RefreshCw, Target, Undo2, X } from "lucide-react";
 import { api, type ContentDraft, type Job, type Writer } from "@/lib/api";
 import { useProject, useProjectId } from "@/hooks/useProject";
 import { Button } from "@/components/ui/button";
@@ -17,7 +17,7 @@ import { cn, fmtPct } from "@/lib/utils";
 import { TimeAgo } from "@/components/ui/time";
 
 export interface PlanItem {
-  id: string; key: string; section: "setup" | "fix" | "routine"; cadence: string; category: string; title: string; why: string;
+  id: string; seq: number | null; key: string; section: "setup" | "fix" | "routine"; cadence: string; category: string; title: string; why: string;
   steps: string[]; suggestions: Record<string, any>; evidence: any[]; impact: number; effort: number; priority: number;
   status: string; completions: { at: string; note: string | null }[]; next_due_at: string | null; last_done_at: string | null;
   resolved_at: string | null; source: string; note: string | null; due: boolean;
@@ -66,23 +66,9 @@ function planToMarkdown(data: Plan, project: string): string {
     ...section("Keep doing (routines)", data.routine),
   ].join("\n");
 }
-const CATEGORY_ICON: Record<string, { icon: typeof Globe; color: string }> = {
-  website: { icon: Globe, color: "text-sky-600 bg-sky-100 dark:bg-sky-900/40 dark:text-sky-300" },
-  content: { icon: FileText, color: "text-violet-600 bg-violet-100 dark:bg-violet-900/40 dark:text-violet-300" },
-  video: { icon: Video, color: "text-rose-600 bg-rose-100 dark:bg-rose-900/40 dark:text-rose-300" },
-  community: { icon: MessagesSquare, color: "text-teal-600 bg-teal-100 dark:bg-teal-900/40 dark:text-teal-300" },
-  backlinks: { icon: Link2, color: "text-amber-600 bg-amber-100 dark:bg-amber-900/40 dark:text-amber-300" },
-  conversion: { icon: Target, color: "text-emerald-600 bg-emerald-100 dark:bg-emerald-900/40 dark:text-emerald-300" },
-  competitors: { icon: Users, color: "text-orange-600 bg-orange-100 dark:bg-orange-900/40 dark:text-orange-300" },
-  ai_visibility: { icon: Bot, color: "text-indigo-600 bg-indigo-100 dark:bg-indigo-900/40 dark:text-indigo-300" },
-  brand: { icon: Megaphone, color: "text-pink-600 bg-pink-100 dark:bg-pink-900/40 dark:text-pink-300" },
-  business: { icon: Briefcase, color: "text-slate-600 bg-slate-100 dark:bg-slate-800 dark:text-slate-300" },
-  setup: { icon: Plug, color: "text-blue-600 bg-blue-100 dark:bg-blue-900/40 dark:text-blue-300" },
-};
-function CategoryIcon({ category }: { category: string }) {
-  const c = CATEGORY_ICON[category] ?? CATEGORY_ICON.business;
-  const I = c.icon;
-  return <span className={cn("flex h-7 w-7 shrink-0 items-center justify-center rounded-md", c.color)} title={CATEGORY_LABEL[category] ?? category}><I className="h-4 w-4" /></span>;
+/** The task's stable per-project number ("NO"), shown where the category icon used to be. */
+function ItemNo({ n }: { n: number | null }) {
+  return <span className="flex h-7 min-w-[1.75rem] shrink-0 items-center justify-center rounded-md bg-muted px-1 text-sm font-semibold tabular-nums text-muted-foreground">{n ?? "—"}</span>;
 }
 
 
@@ -174,6 +160,8 @@ export function PlanPage() {
   const [mineOnly, setMineOnly] = useState(false);
   const [q, setQ] = useState("");
   const [sort, setSort] = useState<{ key: "group" | "impact"; dir: "asc" | "desc" }>({ key: "group", dir: "asc" });
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const navigate = useNavigate();
   const me = useAppStore((st) => st.user);
   if (isLoading) return <Loading />;
   if (error) return <ErrorBox error={error} />;
@@ -181,6 +169,7 @@ export function PlanPage() {
   const s = data.summary;
   const all = [...data.setup, ...(data.business ?? []), ...data.fix, ...data.routine];
   const empty = all.length === 0;
+  const selectedItem = selectedId ? all.find((i) => i.id === selectedId) ?? null : null;
   const isOpen = (i: PlanItem) => i.section === "routine" ? i.status !== "skipped" : (i.status === "todo" || i.status === "in_progress");
   const isDone = (i: PlanItem) => i.section === "routine" ? (i.completions?.length ?? 0) > 0 : i.status === "done";
   const categories = Array.from(new Set(all.map((i) => i.category)));
@@ -249,27 +238,41 @@ export function PlanPage() {
         </div>
       </div>
       {empty ? (
-        <EmptyState title="No plan yet">Click the <b>Refresh</b> button above, or run a website audit first under <Link className="text-primary underline" to="/seo">SEO Performance</Link>.</EmptyState>
+        <EmptyState title="No plan yet">Click the <b>Refresh</b> button above, or run a website audit first with <b>Run jobs</b> on the <Link className="text-primary underline" to="/">Overview</Link> page.</EmptyState>
+      ) : selectedItem ? (
+        // Master–detail: the list collapses into a compact column on the left, the task opens on the right.
+        <div className="flex items-start gap-4">
+          <div className="w-80 shrink-0 divide-y divide-border overflow-y-auto rounded-md border max-h-[calc(100vh-15rem)]">
+            {rows.length === 0
+              ? <p className="py-6 text-center text-sm text-muted-foreground">No tasks match these filters.</p>
+              : rows.map((i) => <ItemCard key={i.id} item={i} tracked={!!linked?.[i.id]} selected={i.id === selectedId} onSelect={setSelectedId} />)}
+          </div>
+          <div className="min-w-0 flex-1 overflow-y-auto rounded-md border bg-white p-5 dark:bg-slate-900 max-h-[calc(100vh-15rem)]">
+            <div className="mb-3 flex items-center justify-end gap-1">
+              <Button size="sm" variant="ghost" onClick={() => navigate(`/plan/${selectedItem.id}`)} title="Open the full-width page"><Maximize2 className="h-3.5 w-3.5" /> Expand</Button>
+              <Button size="icon" variant="ghost" aria-label="Close detail" onClick={() => setSelectedId(null)}><X className="h-4 w-4" /></Button>
+            </div>
+            <ItemDetail item={selectedItem} pid={pid} members={data.members} />
+          </div>
+        </div>
       ) : (
-        <>
-          <Table containerClassName="rounded-md border">
-            <THead><TR>
-              <TH>Task</TH>
-              <TH>
-                <button type="button" className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => sortBy("group")}>Group {sortIcon("group")}</button>
-              </TH>
-              <TH>Category</TH><TH>Status</TH>
-              <TH className="text-right">
-                <button type="button" className="ml-auto inline-flex items-center gap-1 hover:text-foreground" onClick={() => sortBy("impact")}>Impact {sortIcon("impact")}</button>
-              </TH>
-            </TR></THead>
-            <TBody>
-              {rows.length === 0
-                ? <TR><TD colSpan={5} className="py-6 text-center text-sm text-muted-foreground">No tasks match these filters.</TD></TR>
-                : rows.map((i) => <Item key={i.id} item={i} tracked={!!linked?.[i.id]} />)}
-            </TBody>
-          </Table>
-        </>
+        <Table containerClassName="rounded-md border">
+          <THead><TR>
+            <TH>Task</TH>
+            <TH>
+              <button type="button" className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => sortBy("group")}>Group {sortIcon("group")}</button>
+            </TH>
+            <TH>Category</TH><TH>Status</TH>
+            <TH className="text-right">
+              <button type="button" className="ml-auto inline-flex items-center gap-1 hover:text-foreground" onClick={() => sortBy("impact")}>Impact {sortIcon("impact")}</button>
+            </TH>
+          </TR></THead>
+          <TBody>
+            {rows.length === 0
+              ? <TR><TD colSpan={5} className="py-6 text-center text-sm text-muted-foreground">No tasks match these filters.</TD></TR>
+              : rows.map((i) => <Item key={i.id} item={i} tracked={!!linked?.[i.id]} onSelect={setSelectedId} />)}
+          </TBody>
+        </Table>
       )}
       {s.last_generated_at && <p className="mt-8 text-xs text-muted-foreground">Plan last rebuilt <TimeAgo value={s.last_generated_at} />.</p>}
     </div>
@@ -289,17 +292,16 @@ function Stat({ label, value, hint, onSelect }: { label: string; value: number; 
   );
 }
 
-/** A summary row in the plan table. Clicking it opens that item's dedicated working page. */
-function Item({ item, tracked }: { item: PlanItem; tracked?: boolean }) {
+/** A summary row in the plan table. Clicking it opens that item in the side-by-side detail pane. */
+function Item({ item, tracked, onSelect }: { item: PlanItem; tracked?: boolean; onSelect: (id: string) => void }) {
   const routine = item.section === "routine";
   const done = item.status === "done";
-  const navigate = useNavigate();
   return (
-    <TR className={cn("cursor-pointer align-top", done && "opacity-60", item.due && routine && "bg-primary/5")} onClick={() => navigate(`/plan/${item.id}`)}>
+    <TR className={cn("cursor-pointer align-top", done && "opacity-60", item.due && routine && "bg-primary/5")} onClick={() => onSelect(item.id)}>
       <TD>
         <div className="flex items-start gap-2">
           <ChevronRight className="h-4 w-4 mt-0.5 shrink-0 text-muted-foreground" />
-          <CategoryIcon category={item.category} />
+          <ItemNo n={item.seq} />
           <div className="min-w-0"><div className="font-medium">{item.title}</div></div>
         </div>
       </TD>
@@ -321,6 +323,33 @@ function Item({ item, tracked }: { item: PlanItem; tracked?: boolean }) {
   );
 }
 
+/** A divider-separated row in the left column while a task is open on the right (master–detail / "LinkedIn jobs"). */
+function ItemCard({ item, tracked, selected, onSelect }: { item: PlanItem; tracked?: boolean; selected: boolean; onSelect: (id: string) => void }) {
+  const routine = item.section === "routine";
+  const done = item.status === "done";
+  return (
+    <button type="button" onClick={() => onSelect(item.id)}
+      className={cn("block w-full border-l-2 p-3 text-left transition-colors",
+        selected ? "border-l-primary bg-primary/5" : "border-l-transparent hover:bg-slate-50 dark:hover:bg-slate-800/50",
+        done && "opacity-60")}>
+      <div className="flex items-start gap-2">
+        <ItemNo n={item.seq} />
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-medium">{item.title}</div>
+          <div className="mt-1 flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
+            <span>{GROUP_LABEL[item.section] ?? item.section}</span>
+            {routine && <Badge variant={item.due ? "info" : "outline"}>{CADENCE_LABEL[item.cadence]}</Badge>}
+            {item.resolved_at && <Badge variant="success">fixed</Badge>}
+            {tracked && <Badge variant="success">measuring</Badge>}
+            {done && <Badge variant="muted">done</Badge>}
+          </div>
+        </div>
+        <div className="shrink-0 text-sm font-semibold tabular-nums text-primary">{Math.round(item.impact)}</div>
+      </div>
+    </button>
+  );
+}
+
 /** The dedicated page for one plan item — its full "working": why, steps, evidence and the controls to do it. */
 export function PlanItemPage() {
   const pid = useProjectId();
@@ -335,8 +364,17 @@ export function PlanItemPage() {
   return (
     <div>
       {back}
+      <ItemDetail item={item} pid={pid} members={data!.members} />
+    </div>
+  );
+}
+
+/** Title, badges, impact and the full working area for one item — shared by the full page and the split-view pane. */
+function ItemDetail({ item, pid, members }: { item: PlanItem; pid: string; members: { id: string; email: string; name: string | null }[] }) {
+  return (
+    <div>
       <div className="mb-4 flex items-start gap-3">
-        <CategoryIcon category={item.category} />
+        <ItemNo n={item.seq} />
         <div className="min-w-0 flex-1">
           <h1 className="text-xl font-semibold">{item.title}</h1>
           <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
@@ -350,7 +388,7 @@ export function PlanItemPage() {
           <div className="text-2xl font-semibold tabular-nums text-primary">{Math.round(item.impact)}</div>
         </div>
       </div>
-      <ItemWorking item={item} pid={pid} members={data!.members} />
+      <ItemWorking item={item} pid={pid} members={members} />
     </div>
   );
 }

@@ -1044,10 +1044,16 @@ def complete_actions_for_item(db: Session, item: PlanItem, now: datetime | None 
     return len(acts)
 
 
+def _next_seq(db: Session, project_id: uuid.UUID) -> int:
+    """Next per-project display number. Monotonic and never reused, so a task's NO is stable for the project's life."""
+    return (db.scalar(select(func.max(PlanItem.seq)).where(PlanItem.project_id == project_id)) or 0) + 1
+
+
 def sync_plan(db: Session, project: Project) -> dict[str, Any]:
     drafts = build_drafts(db, project)
     now = datetime.now(UTC)
     existing = {p.key: p for p in db.scalars(select(PlanItem).where(PlanItem.project_id == project.id)).all()}
+    next_seq = _next_seq(db, project.id)
     created = updated = resolved = 0
     seen_keys = set()
     for d in drafts:
@@ -1056,7 +1062,7 @@ def sync_plan(db: Session, project: Project) -> dict[str, Any]:
         breakdown["source"] = d.source
         item = existing.get(d.key)
         if item is None:
-            item = PlanItem(project_id=project.id, key=d.key, section=d.section, cadence=d.cadence, category=d.category,
+            item = PlanItem(project_id=project.id, key=d.key, seq=next_seq, section=d.section, cadence=d.cadence, category=d.category,
                             title=d.title, why=d.why, steps=d.steps, suggestions=d.suggestions, evidence=d.evidence,
                             impact=d.impact, confidence=d.confidence, effort=d.effort, priority=prio,
                             score_breakdown=breakdown, origin=d.origin, target_urls=d.target_urls[:50],
@@ -1064,6 +1070,7 @@ def sync_plan(db: Session, project: Project) -> dict[str, Any]:
                             next_due_at=now if d.cadence != "once" else None, last_seen_at=now,
                             history=[{"at": now.isoformat(), "event": "created", "actor": d.origin}])
             db.add(item)
+            next_seq += 1
             created += 1
         else:
             if abs((item.priority or 0) - prio) >= 0.05:
@@ -1095,7 +1102,7 @@ def sync_one(db: Session, project_id: uuid.UUID, draft: Draft) -> PlanItem:
     breakdown["source"] = draft.source
     item = db.scalar(select(PlanItem).where(PlanItem.project_id == project_id, PlanItem.key == draft.key[:300]))
     if item is None:
-        item = PlanItem(project_id=project_id, key=draft.key[:300], section=draft.section, cadence=draft.cadence,
+        item = PlanItem(project_id=project_id, key=draft.key[:300], seq=_next_seq(db, project_id), section=draft.section, cadence=draft.cadence,
                         category=draft.category, title=draft.title, why=draft.why, steps=draft.steps,
                         suggestions=draft.suggestions, evidence=draft.evidence, impact=draft.impact,
                         confidence=draft.confidence, effort=draft.effort, priority=prio, score_breakdown=breakdown,

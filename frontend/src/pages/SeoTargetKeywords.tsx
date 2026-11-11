@@ -42,7 +42,6 @@ export function TargetKeywordsTab({ pid }: { pid: string }) {
         <CardTitle info="Keywords you want to be found for. Volume, difficulty and CPC come from the connected keyword provider and are estimates, not measurements. Only target keywords are priced and rank-checked.">Target</CardTitle>
         <div className="flex gap-2">
           <Button size="sm" onClick={() => setAddOpen(true)}>Add</Button>
-          <Button size="sm" variant="outline" onClick={() => enqueue.mutate({ task_type: "sync_keyword_metrics", params: {} })} disabled={enqueue.isPending}>Refresh metrics</Button>
         </div>
         </div>
         <div className="flex flex-1 flex-col space-y-3">

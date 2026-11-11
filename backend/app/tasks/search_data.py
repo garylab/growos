@@ -9,6 +9,7 @@ from urllib.parse import urlsplit
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 
+from app.adapters.base import ProviderError
 from app.adapters.registry import provider_features, providers_with_feature
 from app.adapters.search_data.common import clean_keyword
 from app.models import (Competitor, Domain, Keyword, KeywordMetric, Project, ProviderConnection, RankedKeyword,
@@ -85,6 +86,26 @@ def _providers(ctx: TaskContext, project_id: uuid.UUID, feature: str) -> list[tu
     return [(k, *get_adapter(ctx.db, project_id, k)) for k in keys]
 
 
+def _collect_fallback(ctx: TaskContext, project_id: uuid.UUID, feature: str, call):
+    """Run `call(adapter)` against each connected provider that can do `feature`, in order, until one succeeds.
+
+    A single-provider job (pricing keywords, charting a trend) no longer dies when its preferred provider is out of
+    credits or quota — e.g. a DataForSEO 402 falls through to Semrush. Returns (provider, adapter, conn, result);
+    raises the last ProviderError if every capable provider failed.
+    """
+    providers = _providers(ctx, project_id, feature)   # ordered, capable; raises if none connected
+    last_exc: ProviderError | None = None
+    for i, (provider, adapter, conn) in enumerate(providers):
+        try:
+            if i:
+                ctx.log(f"Retrying with {provider} after the previous provider failed", level="warning")
+            return provider, adapter, conn, call(adapter)
+        except ProviderError as exc:
+            last_exc = exc
+            ctx.log(f"{provider} could not {FEATURE_LABELS.get(feature, feature)}: {str(exc)[:200]}", level="warning")
+    raise last_exc  # type: ignore[misc]  — providers was non-empty, so a ProviderError was recorded
+
+
 def _host(value: str) -> str:
     v = (value or "").strip().lower()
     return ((urlsplit(v).hostname or "") if "://" in v else v.split("/")[0]).removeprefix("www.")[:255]
@@ -93,14 +114,15 @@ def _host(value: str) -> str:
 @task("sync_keyword_metrics", "Fetch search volume, difficulty and CPC for the brand’s target keywords")
 def sync_keyword_metrics(ctx: TaskContext) -> dict[str, Any]:
     project_id = ctx.project_id
-    provider, adapter, conn = _provider(ctx, project_id, "keyword_metrics")
     keywords = ctx.db.scalars(select(Keyword).where(Keyword.project_id == project_id,
                                                     Keyword.is_target.is_(True))).all()
     if not keywords:
-        return {"provider": provider, "priced": 0, "note": "No target keywords yet — add some under Settings"}
+        return {"priced": 0, "note": "No target keywords yet — add some under Settings"}
     by_text = {k.text.strip().lower(): k for k in keywords}
-    ctx.progress(20, f"Pricing {len(by_text)} keyword(s) with {provider}")
-    result = adapter.collect_keyword_metrics({"keywords": list(by_text)})
+    ctx.progress(20, f"Pricing {len(by_text)} keyword(s)")
+    # Falls back across connected providers (e.g. Semrush) when the first is out of credits/quota.
+    provider, adapter, conn, result = _collect_fallback(
+        ctx, project_id, "keyword_metrics", lambda a: a.collect_keyword_metrics({"keywords": list(by_text)}))
     ctx.save_artifact(provider, "keyword_metrics", result.raw, meta=result.meta)
     rows = adapter.normalize_keyword_metrics(result)
 

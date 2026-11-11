@@ -4,10 +4,8 @@ import { api } from "@/lib/api";
 import { useProjectId } from "@/hooks/useProject";
 import { useActiveTab } from "@/hooks/useTabRoute";
 import { BRAND_TABS } from "@/lib/nav";
-import { useEnqueue } from "@/hooks/useJobs";
-import { EmptyState, ErrorBox, Loading, Metric, PageHeader } from "@/components/ui/misc";
+import { EmptyState, Loading, Metric, PageHeader } from "@/components/ui/misc";
 import { Pagination, usePaged } from "@/components/ui/pagination";
-import { Button } from "@/components/ui/button";
 import { CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { Badge, StatusBadge } from "@/components/ui/badge";
@@ -69,7 +67,6 @@ const BRAND_TAB_META: Record<string, { title: string; info: string }> = {
 
 export function BrandPage() {
   const pid = useProjectId();
-  const enqueue = useEnqueue();
   const tab = useActiveTab(BRAND_TABS, "mentions");
   const { data: summary, isLoading } = useQuery({ queryKey: ["brand-summary", pid], queryFn: () => api.get<Summary>(`/projects/${pid}/brand/summary`), refetchInterval: 15000 });
   const [f, setF] = useState({ entity_type: "", intent: "", sentiment: "", provider_key: "" });
@@ -82,9 +79,7 @@ export function BrandPage() {
   const total = summary?.entities.reduce((a, e) => a + e.total, 0) ?? 0;
   return (
     <div>
-      <PageHeader title={BRAND_TAB_META[tab]?.title ?? "Brand Monitoring"} info={BRAND_TAB_META[tab]?.info ?? "Public mentions of your brand and competitors from Hacker News, Bluesky and any RSS/Atom feeds you configure."}
-        actions={<Button onClick={() => enqueue.mutate({ task_type: "monitor_brand_mentions", params: {} })} disabled={enqueue.isPending}>Re-run</Button>} />
-      <ErrorBox error={enqueue.error} />
+      <PageHeader title={BRAND_TAB_META[tab]?.title ?? "Brand Monitoring"} info={BRAND_TAB_META[tab]?.info ?? "Public mentions of your brand and competitors from Hacker News, Bluesky and any RSS/Atom feeds you configure."} />
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <Metric label="Mentions collected" value={total} source={summary?.last_collected_at ? `last run ${fmtRelative(summary.last_collected_at)}` : "never collected"} />
         <Metric label="Brand mentions" value={brand.reduce((a, e) => a + e.total, 0)} source={brand.length ? `${brand.reduce((a, e) => a + e.positive, 0)} positive · ${brand.reduce((a, e) => a + e.negative, 0)} negative` : ""} hint={summary?.definitions.sentiment} />
@@ -99,7 +94,7 @@ export function BrandPage() {
             <Select className="w-40" value={f.provider_key} onChange={(e) => setF({ ...f, provider_key: e.target.value })}><option value="">Any source</option>{["hackernews", "bluesky", "rss"].map((i) => <option key={i}>{i}</option>)}</Select>
             <div className="ml-auto"><CsvExportButton filename="brand-mentions.csv" rows={mentions ?? []} columns={MENTION_COLUMNS} /></div>
           </div>
-          {!mentions?.length ? <EmptyState title="No mentions found">Click “Re-run” to check for mentions.</EmptyState> : (
+          {!mentions?.length ? <EmptyState title="No mentions found">Run <b>Brand mentions</b> from <b>Run jobs</b> on the Overview page to check for mentions.</EmptyState> : (
             <Table><THead><TR><TH>Published</TH><TH>Source</TH><TH>Author</TH><TH>Entity</TH><TH>Mention</TH><TH>Sentiment</TH><TH>Intent</TH><TH>Topics</TH><TH className="text-right">Views</TH><TH className="text-right">Likes</TH><TH className="text-right">Comments</TH><TH className="text-right">Shares</TH></TR></THead>
               <TBody>{pagedMentions.items.map((m) => <TR key={m.id}>
                 <TD className="text-xs whitespace-nowrap"><TimeAgo value={m.published_at} /></TD>
