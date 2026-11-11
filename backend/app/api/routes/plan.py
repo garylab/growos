@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import Principal, get_principal, get_project
 from app.core.db import get_db
-from app.intelligence.playbook import mark_complete, plan_summary, undo_complete
+from app.intelligence.playbook import complete_actions_for_item, mark_complete, plan_summary, undo_complete
 from app.intelligence.scorecard import INDEX_LEVERS
 from app.models.growth import plan_status_to_action
 from app.models import ActionRecord, PlanItem, Project, ProjectMember, User
@@ -175,6 +175,7 @@ def set_status(item_id: uuid.UUID, body: StatusIn, project: Project = Depends(ge
         i.note = body.note
     if body.status == "done" and i.cadence == "once":
         i.last_done_at = datetime.now(UTC)
+        complete_actions_for_item(db, i)
     db.commit()
     db.refresh(i)
     return _out(i)
@@ -200,6 +201,8 @@ def complete(item_id: uuid.UUID, body: CompleteIn, project: Project = Depends(ge
     if i is None or i.project_id != project.id:
         raise HTTPException(404, "Plan item not found")
     mark_complete(i, body.note)
+    if i.status == "done":
+        complete_actions_for_item(db, i)
     db.commit()
     db.refresh(i)
     return _out(i)

@@ -49,11 +49,14 @@ def sync_search_console(ctx: TaskContext) -> dict[str, Any]:
             if rows:
                 values = [{"project_id": domain.project_id, "domain_id": domain.id, "job_id": ctx.job.id,
                            "provider_key": "google_search_console", "property_uri": domain.gsc_property, **r} for r in rows]
-                stmt = insert(SearchObservation).values(values)
-                stmt = stmt.on_conflict_do_update(constraint="uq_search_obs", set_={
-                    "clicks": stmt.excluded.clicks, "impressions": stmt.excluded.impressions, "ctr": stmt.excluded.ctr,
-                    "position": stmt.excluded.position, "collected_at": stmt.excluded.collected_at, "job_id": stmt.excluded.job_id})
-                ctx.db.execute(stmt)
+                # Postgres binds at most 65535 parameters per statement; at 15 columns a single week of
+                # query+page data overruns that, so insert in batches well under the limit.
+                for i in range(0, len(values), 500):
+                    stmt = insert(SearchObservation).values(values[i:i + 500])
+                    stmt = stmt.on_conflict_do_update(constraint="uq_search_obs", set_={
+                        "clicks": stmt.excluded.clicks, "impressions": stmt.excluded.impressions, "ctr": stmt.excluded.ctr,
+                        "position": stmt.excluded.position, "collected_at": stmt.excluded.collected_at, "job_id": stmt.excluded.job_id})
+                    ctx.db.execute(stmt)
                 total += len(rows)
             record_usage(ctx.db, project_id=domain.project_id, provider_key="google_search_console", operation="searchanalytics.query",
                          job_id=ctx.job.id, connection_id=conn.id if conn else None)

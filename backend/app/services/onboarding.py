@@ -21,6 +21,7 @@ DEFAULT_SCHEDULES = [
     ("run_ai_visibility", 10080, False),      # weekly
     ("build_growth_plan", 10080, False),      # weekly (after the week's data lands)
     ("snapshot_scorecard", 1440, False),      # daily, so the scorecard trend lines fill in
+    ("measure_outcomes", 1440, False),        # daily, so action results refresh as new data lands
 ]
 
 

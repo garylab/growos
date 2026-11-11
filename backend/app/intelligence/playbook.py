@@ -21,8 +21,8 @@ from sqlalchemy.orm import Session
 
 from app.intelligence import data as D
 from app.intelligence.scoring import EFFORT_FACTOR, clamp, expected_ctr, priority_score
-from app.models import (AIAnswerObservation, BrandMention, CollectionJob, PageSnapshot, PlanItem, Project, PromptDefinition,
-                        SearchObservation)
+from app.models import (ActionRecord, AIAnswerObservation, BrandMention, CollectionJob, PageSnapshot, PlanItem, Project,
+                        PromptDefinition, SearchObservation)
 from app.services.providers import list_connections_for
 
 CADENCE_DAYS = {"daily": 1, "weekly": 7, "monthly": 30}
@@ -179,9 +179,14 @@ def fix_items(db: Session, project: Project) -> list[Draft]:
         for f in findings:
             by_code[f.code].append(f)
         for code, fs in by_code.items():
-            # SiteOne's probe never sends Accept-Encoding: br, so it flags Brotli as missing even on sites that serve
-            # it. When our own home-page check confirmed Brotli, drop the false finding so it does not become a task.
+            # SiteOne's probes do not advertise Accept-Encoding: br, nor negotiate image/webp / image/avif, so it
+            # flags these as missing even on sites that serve them. When our own home-page check confirmed support,
+            # drop the false finding so it does not become a task.
             if code == "site_brotli_support" and sig.get("serves_brotli"):
+                continue
+            if code == "site_webp_support" and sig.get("serves_webp"):
+                continue
+            if code == "site_avif_support" and sig.get("serves_avif"):
                 continue
             rule = FIX_RULES.get(code) or SITE_RULES.get(code)
             if not rule:
@@ -1023,6 +1028,22 @@ def build_drafts(db: Session, project: Project) -> list[Draft]:
     return setup_items(db, project) + business_items(db, project) + fix_items(db, project) + routine_items(db, project)
 
 
+def complete_actions_for_item(db: Session, item: PlanItem, now: datetime | None = None) -> int:
+    """Close any open action tracking a plan item once that item is resolved/done.
+
+    Actions are the user's work record for an item. When the item is verified fixed (or marked done) the action is
+    done too, so without this it lingers as 'in progress' forever and its outcome never gets an anchor to measure
+    against. Returns how many actions were completed.
+    """
+    now = now or datetime.now(UTC)
+    acts = db.scalars(select(ActionRecord).where(ActionRecord.plan_item_id == item.id,
+                                                 ActionRecord.status.in_(("planned", "in_progress")))).all()
+    for a in acts:
+        a.status = "done"
+        a.completed_at = a.completed_at or now
+    return len(acts)
+
+
 def sync_plan(db: Session, project: Project) -> dict[str, Any]:
     drafts = build_drafts(db, project)
     now = datetime.now(UTC)
@@ -1061,6 +1082,7 @@ def sync_plan(db: Session, project: Project) -> dict[str, Any]:
                 and item.status in ("todo", "in_progress", "done") and item.resolved_at is None):
             item.status, item.resolved_at = "done", now
             item.history = [*(item.history or []), {"at": now.isoformat(), "event": "auto_resolved"}][-50:]
+            complete_actions_for_item(db, item, now)
             resolved += 1
     db.commit()
     return {"created": created, "updated": updated, "auto_resolved": resolved, "total": len(drafts)}

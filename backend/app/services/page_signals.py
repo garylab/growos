@@ -82,6 +82,22 @@ def serves_brotli(url: str) -> bool | None:
     return resp.headers.get("content-encoding", "").lower() == "br"
 
 
+def serves_image_format(image_url: str, mime: str) -> bool | None:
+    """Whether the server returns `mime` (e.g. image/webp) for an image when the client asks for it. None on error.
+
+    Like the Brotli check, SiteOne reports a site as lacking modern image formats when its probe does not negotiate
+    them. We request the page's own sample image with an explicit Accept and read the content-type; an image
+    optimizer (Next.js, Cloudflare Polish, Cloudinary, imgix) answers with the negotiated format when it supports it.
+    """
+    try:
+        resp = safe_get(image_url, timeout=15, headers={"Accept": f"{mime},image/*"})
+    except Exception:  # noqa: BLE001 — a failed probe must never break signal collection
+        return None
+    if resp.status_code != 200:
+        return None
+    return resp.headers.get("content-type", "").split(";")[0].strip().lower() == mime
+
+
 def looks_unrendered(html: str) -> bool:
     """True when a page arrived as an app shell: markup present, content absent.
 
@@ -180,6 +196,18 @@ def extract_signals(html: str, page_url: str) -> dict[str, Any]:
             logo_img = urljoin(page_url, n.attributes.get("src") or n.attributes.get("data-src") or "")
             break
     header_svg = bool(tree.css("header svg, nav svg"))
+    # A representative image to probe for modern-format support. Prefer what the page actually requests — an
+    # optimizer URL (/_next/image, Cloudinary f_auto, imgix) negotiates format; a raw .svg or data: URI cannot.
+    sample_image = None
+    for n in tree.css("img"):
+        src = (n.attributes.get("src") or n.attributes.get("data-src") or "").strip()
+        if not src or src.startswith("data:"):
+            continue
+        resolved = urljoin(page_url, src)
+        if resolved.lower().split("?")[0].endswith(".svg"):
+            continue
+        sample_image = resolved
+        break
     ld_logo = None
     for obj in _iter_ld_all(tree):
         lg = obj.get("logo")
@@ -251,6 +279,7 @@ def extract_signals(html: str, page_url: str) -> dict[str, Any]:
         "own_domain_emails": own_domain_emails[:5],
         "free_emails": free_emails[:5],
         "logo_img": logo_img,
+        "sample_image": sample_image,
         "logo_in_schema": ld_logo,
         "favicon": urljoin(page_url, icons[0]) if icons else None,
         "has_logo": bool(logo_img or ld_logo or header_svg),

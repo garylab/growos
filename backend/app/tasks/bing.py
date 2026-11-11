@@ -47,12 +47,14 @@ def sync_bing_webmaster(ctx: TaskContext) -> dict[str, Any]:
         if rows:
             values = [{"project_id": domain.project_id, "domain_id": domain.id, "job_id": ctx.job.id,
                        "provider_key": PROVIDER, "site_url": site_url, "dataset": dataset, **r} for r in rows]
-            stmt = insert(BingSearchObservation).values(values)
-            stmt = stmt.on_conflict_do_update(constraint="uq_bing_search_obs", set_={
-                "clicks": stmt.excluded.clicks, "impressions": stmt.excluded.impressions, "ctr": stmt.excluded.ctr,
-                "position": stmt.excluded.position, "collected_at": stmt.excluded.collected_at,
-                "job_id": stmt.excluded.job_id})
-            ctx.db.execute(stmt)
+            # Batch to stay under Postgres' 65535-parameter-per-statement limit on large result sets.
+            for i in range(0, len(values), 500):
+                stmt = insert(BingSearchObservation).values(values[i:i + 500])
+                stmt = stmt.on_conflict_do_update(constraint="uq_bing_search_obs", set_={
+                    "clicks": stmt.excluded.clicks, "impressions": stmt.excluded.impressions, "ctr": stmt.excluded.ctr,
+                    "position": stmt.excluded.position, "collected_at": stmt.excluded.collected_at,
+                    "job_id": stmt.excluded.job_id})
+                ctx.db.execute(stmt)
         record_usage(ctx.db, project_id=domain.project_id, provider_key=PROVIDER, operation=dataset,
                      job_id=ctx.job.id, connection_id=conn.id if conn else None)
         ctx.db.commit()

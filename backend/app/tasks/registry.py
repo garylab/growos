@@ -60,3 +60,4 @@ def load_all() -> None:
     import app.tasks.plan  # noqa: F401
     import app.tasks.content  # noqa: F401
     import app.tasks.scorecard_task  # noqa: F401
+    import app.tasks.outcomes  # noqa: F401
