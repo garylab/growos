@@ -1,11 +1,11 @@
 import { Fragment, useEffect, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { Activity, ChevronDown, LogOut, Menu, Moon, Sun, X } from "lucide-react";
+import { ChevronDown, Home, LogOut, Menu, Moon, Sun, X } from "lucide-react";
 import { NAV, firstTab, sectionTab, tabHref, type NavItem } from "@/lib/nav";
 import { api } from "@/lib/api";
 import { useProjects } from "@/hooks/useProject";
 import { useAppStore } from "@/store/app";
-import { useJobs } from "@/hooks/useJobs";
+import { RunJobsButton } from "@/components/run-jobs";
 import { cn } from "@/lib/utils";
 import { Select } from "../ui/input";
 import { NotificationBell } from "../NotificationBell";
@@ -70,8 +70,6 @@ export function AppShell() {
   const theme = useAppStore((s) => s.theme);
   const setTheme = useAppStore((s) => s.setTheme);
   const navigate = useNavigate();
-  const { data: jobs } = useJobs({ limit: 20 });
-  const active = jobs?.filter((j) => j.status === "running" || j.status === "queued").length ?? 0;
   const [navOpen, setNavOpen] = useState(false);
 
   // The shell owns the viewport and only the main column scrolls. Previously the document scrolled with the
@@ -89,15 +87,13 @@ export function AppShell() {
           navOpen ? "translate-x-0" : "-translate-x-full",
         )}
       >
-        <div className="px-4 py-4 flex items-center justify-between">
-          <div className="min-w-0">
-            <div className="text-lg font-bold tracking-tight">GrowOS</div>
-            <div className="flex items-center gap-1 text-xs text-muted-foreground" title="Background worker status">
-              <Activity className={cn("h-3.5 w-3.5", active && "text-primary animate-pulse")} />
-              {active ? `${active} job(s) active` : "Worker idle"}
-            </div>
+        <div className="flex items-start gap-2 px-3 py-4">
+          <Link to="/" title="Home" aria-label="Back to brands" onClick={() => setNavOpen(false)} className="rounded-md py-1.5 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><Home className="h-5 w-5" /></Link>
+          <Link to="/" title="Home" onClick={() => setNavOpen(false)} className="rounded py-0.5 text-lg font-bold tracking-tight focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">GrowOS</Link>
+          <div className="ml-auto">
+            <RunJobsButton />
           </div>
-          <button className="lg:hidden text-muted-foreground hover:text-foreground" aria-label="Close menu" onClick={() => setNavOpen(false)}><X className="h-5 w-5" /></button>
+          <button className="ml-auto py-1.5 lg:hidden text-muted-foreground hover:text-foreground" aria-label="Close menu" onClick={() => setNavOpen(false)}><X className="h-5 w-5" /></button>
         </div>
         <div className="px-3 pt-3 pb-5 border-b">
           <Select className="w-full" value={projectId ?? ""} onChange={(e) => { if (e.target.value === "__new") navigate("/setup"); else setProjectId(e.target.value); }}>

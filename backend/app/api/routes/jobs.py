@@ -4,7 +4,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_project
@@ -58,6 +58,13 @@ def run_selected(body: dict, project: Project = Depends(get_project), db: Sessio
     from app.services.job_catalog import enqueue_selected
     enqueued = enqueue_selected(db, project, list(body.get("task_types") or []))
     return {"enqueued": enqueued, "count": len(enqueued)}
+
+
+@router.get("/projects/{project_id}/jobs/activity")
+def worker_activity(project: Project = Depends(get_project), db: Session = Depends(get_db)):
+    active = db.scalar(select(func.count()).select_from(CollectionJob).where(
+        CollectionJob.project_id == project.id, CollectionJob.status.in_(["running", "queued"])))
+    return {"active": active or 0}
 
 
 @router.get("/jobs/{job_id}", response_model=JobOut)

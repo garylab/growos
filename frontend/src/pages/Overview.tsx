@@ -10,7 +10,6 @@ import { delta, fmtInt, fmtNum, fmtPct } from "@/lib/utils";
 import { fmtDay, fmtDuration } from "@/lib/time";
 import { TimeAgo } from "@/components/ui/time";
 import { ScorecardSection, useScorecard } from "@/pages/Scorecard";
-import { RunJobsButton } from "@/components/run-jobs";
 import { TimeSeriesChart, type ChartSeries } from "@/components/ui/timeseries-chart";
 
 /** Small uppercase section label with an optional click-to-reveal explanation. */
@@ -77,7 +76,7 @@ export function Overview() {
 
   return (
     <div>
-      <PageHeader title="Overview" actions={<RunJobsButton />} />
+      <PageHeader title="Overview" />
       {nothingConfigured && (
         <div className="mb-6">
           <EmptyState title="No data collected yet">

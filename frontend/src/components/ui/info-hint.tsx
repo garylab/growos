@@ -1,4 +1,4 @@
-import { ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { ReactNode, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Info } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -14,6 +14,7 @@ import { cn } from "@/lib/utils";
 export function InfoHint({ children, label = "More information", className, width = "w-64", icon, tone, hover = false }:
   { children: ReactNode; label?: string; className?: string; width?: string; icon?: ReactNode; tone?: string; hover?: boolean }) {
   const [open, setOpen] = useState(false);
+  const tooltipId = useId();
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
   const ref = useRef<HTMLSpanElement>(null);
   const panel = useRef<HTMLSpanElement>(null);
@@ -57,17 +58,19 @@ export function InfoHint({ children, label = "More information", className, widt
   }, [open]);
   return (
     <span ref={ref} className={cn("relative inline-flex align-middle", className)}
-      onMouseEnter={hover ? () => setOpen(true) : undefined} onMouseLeave={hover ? () => setOpen(false) : undefined}>
-      <button type="button" aria-label={label} aria-expanded={open} onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOpen((o) => !o); }}
+      onPointerEnter={hover ? (event) => { if (event.pointerType === "mouse") setOpen(true); } : undefined}
+      onPointerLeave={hover ? (event) => { if (event.pointerType === "mouse") setOpen(false); } : undefined}>
+      <button type="button" aria-label={label} aria-expanded={open} aria-describedby={open ? tooltipId : undefined} onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOpen((o) => !o); }}
         className={cn(tone ?? "text-muted-foreground hover:text-foreground focus-visible:text-foreground", "focus-visible:outline-none", open && !tone && "text-foreground")}>
         {icon ?? <Info className="h-3.5 w-3.5" />}
       </button>
       {open && createPortal(
         // Hidden until measured so it never paints at the wrong place; hovering the panel itself keeps it open so
         // long error text stays selectable.
-        <span ref={panel} role="tooltip" style={{ top: pos?.top ?? 0, left: pos?.left ?? 0, visibility: pos ? "visible" : "hidden" }}
-          onMouseEnter={hover ? () => setOpen(true) : undefined} onMouseLeave={hover ? () => setOpen(false) : undefined}
-          className={cn("fixed z-50 max-w-[calc(100vw-1rem)] rounded-md border bg-white dark:bg-slate-900 p-2.5 text-xs font-normal normal-case tracking-normal text-muted-foreground shadow-lg", width)}>
+        <span ref={panel} id={tooltipId} role="tooltip" style={{ top: pos?.top ?? 0, left: pos?.left ?? 0, visibility: pos ? "visible" : "hidden" }}
+          onPointerEnter={hover ? (event) => { if (event.pointerType === "mouse") setOpen(true); } : undefined}
+      onPointerLeave={hover ? (event) => { if (event.pointerType === "mouse") setOpen(false); } : undefined}
+          className={cn("pointer-events-auto fixed z-50 max-w-[calc(100vw-1rem)] rounded-md border bg-white dark:bg-slate-900 p-2.5 text-xs font-normal normal-case tracking-normal text-muted-foreground shadow-lg", width)}>
           {children}
         </span>, document.body)}
     </span>

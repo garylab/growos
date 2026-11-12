@@ -2,6 +2,16 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type Job } from "@/lib/api";
 import { useProjectId } from "./useProject";
 
+export function useWorkerActivity(enabled: boolean) {
+  const id = useProjectId();
+  return useQuery({
+    queryKey: ["jobs", id, "activity"],
+    queryFn: () => api.get<{ active: number }>(`/projects/${id}/jobs/activity`),
+    enabled: !!id && enabled,
+    refetchInterval: (q) => q.state.data?.active ? 3000 : 15000,
+  });
+}
+
 export function useJobs(opts?: { task_type?: string; limit?: number }) {
   const id = useProjectId();
   const qs = new URLSearchParams();
